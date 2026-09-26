@@ -21,7 +21,7 @@ import {
 } from '../src/graphql/replayPagination.js';
 import { DeduplicationFilter } from '../src/utils/deduplicate.js';
 import { ShareRecord } from '../src/models/shareRecord.js';
-import { COMET_RESHARES_QUERY_NAME } from '../src/constants.js';
+import { COMET_RESHARES_QUERY_NAME, COMET_RESHARES_DIALOG_QUERY_NAME } from '../src/constants.js';
 
 interface CapturedPair {
   request: Request;
@@ -61,8 +61,9 @@ async function runHybridExperiment() {
 
   const page = await context.newPage();
 
-  // Intercept the first pagination query and its response
+  // Intercept the dialog query and pagination query
   const capturedPaginationQueries: CapturedPair[] = [];
+  const capturedDialogResponses: string[] = [];
   const requestPostDataMap = new Map<Request, string>();
 
   page.on('request', (req) => {
@@ -82,7 +83,15 @@ async function runHybridExperiment() {
     const postData = requestPostDataMap.get(req) || req.postData() || '';
     const op = identifyGraphqlOperation(postData);
 
-    // Specifically capture the pagination query (not the initial modal query)
+    // Capture initial modal dialog query
+    if (op.friendlyName === COMET_RESHARES_DIALOG_QUERY_NAME) {
+      try {
+        const responseBody = await res.text();
+        capturedDialogResponses.push(responseBody);
+      } catch {}
+    }
+
+    // Specifically capture the pagination query
     if (op.friendlyName === COMET_RESHARES_QUERY_NAME) {
       try {
         const responseBody = await res.text();
@@ -113,10 +122,27 @@ async function runHybridExperiment() {
     const { container: reshareContainer } = await findReshareScrollContainer(reshareDialog);
     await page.waitForTimeout(2000);
 
+    const dedupeFilter = new DeduplicationFilter();
+    const allCollectedRecords: ShareRecord[] = [];
+
+    // Parse initial modal dialog query if captured (Vu Hoa, Lương Văn Hiển)
+    console.log(`\n[STEP 1.1] Checking initial modal reshares (${capturedDialogResponses.length} dialog query captured)...`);
+    for (const dialogBody of capturedDialogResponses) {
+      const chunks = parseGraphqlResponse(dialogBody);
+      for (const chunk of chunks) {
+        const parsed = parseReshares(chunk, targetUrl);
+        const unique = dedupeFilter.filterBatch(parsed.records);
+        allCollectedRecords.push(...unique);
+        unique.forEach((r) => {
+          console.log(`  [INITIAL MODAL] ${r.sharerName} (Unix: ${r.sharedAtUnix}, ISO: ${r.sharedAtIso})`);
+        });
+      }
+    }
+
     // ----------------------------------------------------------------
     // STEP 2: Trigger EXACTLY ONE UI scroll to capture template
     // ----------------------------------------------------------------
-    console.log('[STEP 2] Performing ONE UI scroll to trigger initial pagination request...');
+    console.log('\n[STEP 2] Performing ONE UI scroll to trigger initial pagination request...');
     await scrollReshares(reshareContainer, 800);
     await page.keyboard.press('PageDown').catch(() => {});
 
@@ -149,7 +175,6 @@ async function runHybridExperiment() {
     console.log(`  Cursor Present: ${safeMeta.cursorPresent}`);
     console.log(`  Cursor Hash:    ${safeMeta.cursorHash}`);
 
-    const dedupeFilter = new DeduplicationFilter();
     const initialChunks = parseGraphqlResponse(firstCaptured.responseBody);
     const initialRecords: ShareRecord[] = [];
     let initialPageInfo: { has_next_page?: boolean; end_cursor?: string | null } | undefined;
@@ -158,6 +183,7 @@ async function runHybridExperiment() {
       const parsed = parseReshares(chunk, targetUrl);
       const unique = dedupeFilter.filterBatch(parsed.records);
       initialRecords.push(...unique);
+      allCollectedRecords.push(...unique);
       if (parsed.pageInfo) {
         initialPageInfo = parsed.pageInfo;
       }
@@ -209,6 +235,7 @@ async function runHybridExperiment() {
 
     console.log(`[HYBRID] Extracted ${replayedRecords.length} raw record(s) from replayed response.`);
     const genuinelyNewRecords = dedupeFilter.filterBatch(replayedRecords);
+    allCollectedRecords.push(...genuinelyNewRecords);
 
     console.log('\n[STEP 4] DEDUPLICATION & VALIDATION:');
     console.log(`  Total Replayed Records:  ${replayedRecords.length}`);
@@ -260,6 +287,7 @@ async function runHybridExperiment() {
       }
 
       const loopNew = dedupeFilter.filterBatch(loopRecords);
+      allCollectedRecords.push(...loopNew);
       console.log(`  Page #${iteration} fetched: ${loopRecords.length} record(s), ${loopNew.length} new.`);
       loopNew.forEach((r) => {
         console.log(`    -> ${r.sharerName} (Unix: ${r.sharedAtUnix})`);
@@ -281,34 +309,17 @@ async function runHybridExperiment() {
     const countTestValues = [1, 5, 10];
     const countResults: Array<{ requestedCount: number; returnedEdges: number; ok: boolean }> = [];
 
-    if (currentCursor) {
-      for (const countVal of countTestValues) {
-        try {
-          const testRaw = await replayPaginationRequest(page, template, currentCursor, countVal);
-          const chunks = parseGraphqlResponse(testRaw);
-          let countRecords = 0;
-          for (const c of chunks) {
-            countRecords += parseReshares(c, targetUrl).records.length;
-          }
-          countResults.push({ requestedCount: countVal, returnedEdges: countRecords, ok: true });
-        } catch (e) {
-          countResults.push({ requestedCount: countVal, returnedEdges: 0, ok: false });
+    for (const countVal of countTestValues) {
+      try {
+        const testRaw = await replayPaginationRequest(page, template, initialEndCursor, countVal);
+        const chunks = parseGraphqlResponse(testRaw);
+        let countRecords = 0;
+        for (const c of chunks) {
+          countRecords += parseReshares(c, targetUrl).records.length;
         }
-      }
-    } else {
-      // Re-test with initial cursor to check count behavior
-      for (const countVal of countTestValues) {
-        try {
-          const testRaw = await replayPaginationRequest(page, template, initialEndCursor, countVal);
-          const chunks = parseGraphqlResponse(testRaw);
-          let countRecords = 0;
-          for (const c of chunks) {
-            countRecords += parseReshares(c, targetUrl).records.length;
-          }
-          countResults.push({ requestedCount: countVal, returnedEdges: countRecords, ok: true });
-        } catch (e) {
-          countResults.push({ requestedCount: countVal, returnedEdges: 0, ok: false });
-        }
+        countResults.push({ requestedCount: countVal, returnedEdges: countRecords, ok: true });
+      } catch (e) {
+        countResults.push({ requestedCount: countVal, returnedEdges: 0, ok: false });
       }
     }
 
@@ -335,6 +346,12 @@ async function runHybridExperiment() {
     console.log(`UI Scrolls Used:     EXACTLY 1 (Bootstrap only)`);
     console.log(`Invariant Preserved: YES (edge.node.creation_time)`);
     console.log(`Secrets Redacted:    YES (zero credentials/tokens logged or persisted)`);
+    console.log(`Total Collected:     ${allCollectedRecords.length} public reshares`);
+    console.log('----------------------------------------------------------------');
+    console.log('ALL COLLECTED PUBLIC RESHARES:');
+    allCollectedRecords.forEach((r, idx) => {
+      console.log(`  [${idx + 1}] ${r.sharerName.padEnd(22)} | Unix: ${r.sharedAtUnix} | ISO: ${r.sharedAtIso} | Post ID: ${r.sharePostId}`);
+    });
     console.log('================================================================\n');
   } finally {
     await browser.close();
