@@ -4,18 +4,30 @@ import { ScraperError } from '../../models/errors.js';
 
 /**
  * Validates and normalizes an unknown value into a Playwright-compatible cookie array.
+ * Supports:
+ *   - Direct array of cookie objects: [{ name, value, domain, ... }]
+ *   - Object wrapper with "cookies" array (e.g. Cookie-Editor, EditThisCookie, storageState): { url, cookies: [...] }
  * Strictly avoids logging sensitive cookie values.
  */
 export function validateCookieArray(input: unknown): PlaywrightCookie[] {
-  if (!Array.isArray(input)) {
+  let cookieItems: unknown = input;
+
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    const obj = input as Record<string, unknown>;
+    if (Array.isArray(obj.cookies)) {
+      cookieItems = obj.cookies;
+    }
+  }
+
+  if (!Array.isArray(cookieItems)) {
     throw new ScraperError(
       'AUTH_COOKIES_MALFORMED',
-      'Cookie payload must be a JSON array of cookie objects',
+      'Cookie payload must be a JSON array of cookie objects or an object containing a "cookies" array',
       'Provide an array of objects with "name", "value", and "domain" fields.'
     );
   }
 
-  if (input.length === 0) {
+  if (cookieItems.length === 0) {
     throw new ScraperError(
       'AUTH_COOKIES_MALFORMED',
       'Cookie array is empty. At least one authenticated Facebook cookie (such as c_user and xs) is required.'
@@ -24,8 +36,8 @@ export function validateCookieArray(input: unknown): PlaywrightCookie[] {
 
   const validCookies: PlaywrightCookie[] = [];
 
-  for (let idx = 0; idx < input.length; idx++) {
-    const item = input[idx];
+  for (let idx = 0; idx < cookieItems.length; idx++) {
+    const item = cookieItems[idx];
     if (!item || typeof item !== 'object') {
       throw new ScraperError(
         'AUTH_COOKIES_MALFORMED',
@@ -33,7 +45,17 @@ export function validateCookieArray(input: unknown): PlaywrightCookie[] {
       );
     }
 
-    const { name, value, domain, path, expires, httpOnly, secure, sameSite } = item as Record<string, unknown>;
+    const {
+      name,
+      value,
+      domain,
+      path,
+      expires,
+      expirationDate,
+      httpOnly,
+      secure,
+      sameSite,
+    } = item as Record<string, unknown>;
 
     if (typeof name !== 'string' || name.trim() === '') {
       throw new ScraperError(
@@ -63,13 +85,14 @@ export function validateCookieArray(input: unknown): PlaywrightCookie[] {
       if (lower === 'strict') normalizedSameSite = 'Strict';
       else if (lower === 'lax') normalizedSameSite = 'Lax';
       else if (lower === 'none' || lower === 'no_restriction') normalizedSameSite = 'None';
+      // "unspecified" or other unrecognized values default to undefined (Playwright standard)
     }
 
-    // Normalize expires (seconds or ms)
+    // Normalize expires (seconds or ms) — support both Playwright "expires" and Chrome "expirationDate"
+    const rawExpires = expires ?? expirationDate;
     let normalizedExpires: number | undefined;
-    if (typeof expires === 'number' && !Number.isNaN(expires) && expires > 0) {
-      // If expires is in ms (greater than year 3000 in seconds), convert to seconds
-      normalizedExpires = expires > 32503680000 ? Math.floor(expires / 1000) : Math.floor(expires);
+    if (typeof rawExpires === 'number' && !Number.isNaN(rawExpires) && rawExpires > 0) {
+      normalizedExpires = rawExpires > 32503680000 ? Math.floor(rawExpires / 1000) : Math.floor(rawExpires);
     }
 
     validCookies.push({
@@ -91,12 +114,19 @@ export function validateCookieArray(input: unknown): PlaywrightCookie[] {
  * Loads Facebook cookies from either a file path or raw JSON string.
  */
 export function loadCookies(filePathOrJson: string): PlaywrightCookie[] {
-  let rawContent = filePathOrJson.trim();
+  let targetPath = filePathOrJson.trim();
 
-  // If path points to an existing file, read it
-  if (fs.existsSync(rawContent)) {
+  // If specified file does not exist, check fallback locations in secrets/
+  if (!fs.existsSync(targetPath)) {
+    if (targetPath.includes('facebook-cookies.json') && fs.existsSync('./secrets/facebook-cookies.example.json')) {
+      targetPath = './secrets/facebook-cookies.example.json';
+    }
+  }
+
+  let rawContent = targetPath;
+  if (fs.existsSync(targetPath)) {
     try {
-      rawContent = fs.readFileSync(rawContent, 'utf-8');
+      rawContent = fs.readFileSync(targetPath, 'utf-8');
     } catch (err) {
       throw new ScraperError(
         'AUTH_COOKIES_MALFORMED',
