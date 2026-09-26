@@ -1,0 +1,39 @@
+{
+  "data": {
+    "node": {
+      "__typename": "Feedback",
+      "id": "feedback_test_123",
+      "reshares": {
+        "edges": [
+          {
+            "node": {
+              "post_id": "4914293075523572",
+              "creation_time": 1785512929,
+              "comet_sections": {
+                "context_layout": {
+                  "story": {
+                    "actors": [
+                      {
+                        "id": "USER_ID",
+                        "name": "Example User",
+                        "profile_url": "https://facebook.com/user.example"
+                      }
+                    ]
+                  }
+                }
+              },
+              "permalink_url": "https://facebook.com/example/posts/RESHARE",
+              "attached_story": {
+                "creation_time": 1753949084
+              }
+            }
+          }
+        ],
+        "page_info": {
+          "end_cursor": "NEXT_CURSOR",
+          "has_next_page": true
+        }
+      }
+    }
+  }
+}

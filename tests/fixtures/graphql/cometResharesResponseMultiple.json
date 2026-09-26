@@ -1,0 +1,80 @@
+{
+  "data": {
+    "node": {
+      "__typename": "Feedback",
+      "id": "feedback_multi_999",
+      "reshares": {
+        "edges": [
+          {
+            "node": {
+              "id": "story_edge_1",
+              "post_id": "post_111",
+              "creation_time": 1785513000,
+              "comet_sections": {
+                "context_layout": {
+                  "story": {
+                    "actors": [
+                      {
+                        "id": "user_111",
+                        "name": "First Sharer",
+                        "profile_url": "https://facebook.com/first.sharer"
+                      }
+                    ]
+                  }
+                }
+              },
+              "permalink_url": "https://facebook.com/post_111",
+              "attached_story": {
+                "creation_time": 1750000000
+              }
+            }
+          },
+          {
+            "node": {
+              "id": "story_edge_2",
+              "post_id": "post_222",
+              "creation_time": 1785514000,
+              "comet_sections": {
+                "context_layout": {
+                  "story": {
+                    "actors": [
+                      {
+                        "id": "user_222",
+                        "name": "Second Sharer",
+                        "profile_url": "https://facebook.com/second.sharer"
+                      }
+                    ]
+                  }
+                }
+              },
+              "permalink_url": "https://facebook.com/post_222",
+              "attached_story": null
+            }
+          },
+          {
+            "node": {
+              "id": "story_edge_3",
+              "post_id": "post_333",
+              "creation_time": 1785515000,
+              "comet_sections": {
+                "context_layout": {
+                  "story": {
+                    "actors": []
+                  }
+                }
+              },
+              "permalink_url": null,
+              "attached_story": {
+                "creation_time": 1750000000
+              }
+            }
+          }
+        ],
+        "page_info": {
+          "end_cursor": "CURSOR_PAGE_2",
+          "has_next_page": false
+        }
+      }
+    }
+  }
+}

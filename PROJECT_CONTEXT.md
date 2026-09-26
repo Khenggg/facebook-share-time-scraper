@@ -1,0 +1,77 @@
+# PROJECT_CONTEXT.md
+
+## 1. Project Overview & Problem Statement
+
+**Facebook Public Reshare Time Scraper** is an Apify Actor engineered to scrape public reshares of any given Facebook public post URL. 
+
+### Core Problem Solved
+When analyzing viral distribution, disinformation cascades, PR crises, or organic post amplification on Facebook, knowing **exact chronological share timestamps** is essential. However:
+1. The Facebook web UI displays relative human strings (`"5d"`, `"31 July"`, `"2 hrs ago"`) which lack exact seconds, omit years for recent dates, and are prone to browser timezone distortion.
+2. Logged-in Facebook users clicking the "Share" count or button often get trapped in the Share Composer dialog rather than viewing "People who shared this".
+3. Private or friends-only reshares are intentionally inaccessible; attempting to authenticate accounts leads to checkpoint bans, cookie invalidation, and compliance violations.
+
+### Solution
+This project operates entirely in **LOGGED-OUT mode** (`__user = 0`), opens the public post, triggers the native "People who shared this" dialog, and intercepts the Facebook frontend's Relay GraphQL pagination queries (`CometResharesFeedPaginationQuery`). The crawler extracts the **exact Unix timestamp** (`creation_time`) directly from the outer reshare GraphQL response, converts it to ISO/local formats, deduplicates entries, and outputs structured records to the Apify Dataset.
+
+---
+
+## 2. Reverse-Engineering Facts vs Assumptions vs Unknowns
+
+### 2.1 Confirmed Facts (Observed via Chrome DevTools - September 2026)
+- **Logged-Out Execution**: When an incognito/logged-out browser accesses a public Facebook post, it can view the "People who shared this" dialog without authentication (`__user=0` in payload).
+- **GraphQL Endpoint**: The Facebook frontend posts to `https://www.facebook.com/api/graphql/`.
+- **Query Classification**: Pagination is powered by Relay Modern:
+  - `fb_api_caller_class = RelayModern`
+  - `fb_api_req_friendly_name = CometResharesFeedPaginationQuery`
+- **Canonical Share Time Source**:
+  $$\text{Share Timestamp} = \texttt{data.node.reshares.edges[i].node.creation_time}$$
+  This is an exact Unix timestamp in seconds (e.g., `1785512929`).
+- **Critical Structural Distinction (Outer Story vs Attached Story)**:
+  ```text
+  reshares.edges[i].node
+  │
+  ├── creation_time ───────► [CANONICAL SHARE TIMESTAMP] (e.g. 1785512929)
+  │
+  ├── post_id ─────────────► Outer reshare post ID
+  ├── permalink_url ───────► Outer reshare permalink
+  │
+  └── attached_story ──────► [ATTACHED ORIGINAL POST]
+          └── creation_time ─► [ORIGINAL POST TIMESTAMP] (e.g. 1753949084) - DO NOT USE!
+  ```
+- **Lazy Loading**: Reshare items are lazy loaded only when the inner scroll container of the dialog is scrolled. Scrolling the outer `window` or `document.body` produces zero pagination requests.
+
+### 2.2 Assumptions (Valid for Current Implementation)
+- As long as the post is publicly accessible, Facebook allows unauthenticated browsers to read public reshares up to Facebook's internal public listing cap.
+- Triggering the reshares listing from the UI requires finding an anchor/button whose accessible text or structure corresponds to the share count (e.g. `X shares` or `X lượt chia sẻ`).
+- Network responses may be delivered as a single JSON object or newline-delimited JSON chunks (Relay batch / defer format).
+
+### 2.3 Unknowns & Volatility Points
+- **`doc_id` Longevity**: A documented query ID observed was `28947339021537955`. **DO NOT hardcode this doc_id**; Facebook rotates query doc IDs across weekly frontend builds. Intercepting response by friendly name is vastly more robust.
+- **Maximum Visible Shares Cap**: Facebook often caps the visible public reshares list (e.g. 200–2,000 items) regardless of the total counter displayed on the post.
+- **Sharer Identity Redaction**: If a user shared a post publicly but their profile has strict public visibility restrictions, Facebook may omit `name` or return an anonymous user placeholder.
+
+---
+
+## 3. Architecture Decisions
+
+1. **Passive Interception over Direct HTTP Replay**:
+   Instead of forging signed GraphQL requests (which require fragile parameters like `fb_dtsg`, `lsd`, dynamic `doc_id`, internal session hashes), the scraper drives a real Chromium instance via Playwright. Facebook's own JavaScript client handles crypto, tokens, and pagination calls; our crawler simply listens to network responses.
+2. **Strict Separation of Concerns**:
+   - `src/facebook/`: DOM interactions and selectors. If Facebook changes its CSS or DOM layout, changes are isolated here.
+   - `src/graphql/`: Pure response parsing, validation, and normalization. Zero DOM or browser dependencies. Can be tested 100% offline with recorded fixtures.
+   - `src/crawler/`: Orchestration, Playwright context setup, event routing, Apify dataset persistence.
+3. **No Auth / Zero Sensitive Data**:
+   No credentials, cookies, tokens, or session pools are stored, logged, or needed.
+
+---
+
+## 4. Key Terminology
+
+| Term | Definition |
+|---|---|
+| **Outer Reshare Story** | The new post created when a user shares an existing post. Represented by `edge.node`. |
+| **Attached Story** | The original embedded post inside the reshare. Represented by `edge.node.attached_story`. |
+| **`creation_time`** | Unix timestamp (in seconds) stored at `edge.node.creation_time` indicating when the reshare happened. |
+| **`CometResharesFeedPaginationQuery`** | The Facebook GraphQL query responsible for fetching the next slice of reshares. |
+| **Logged-Out State** | Browser session without cookies or credentials, operating with `__user = 0`. |
+| **Compound Deduplication Key** | Fallback unique identifier: `sharerId + sharedAtUnix + shareUrl`. |

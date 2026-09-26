@@ -1,0 +1,65 @@
+{
+  "title": "Facebook Share Record Dataset Schema",
+  "type": "object",
+  "description": "Output schema for scraped Facebook public reshares.",
+  "properties": {
+    "originalPostUrl": {
+      "type": "string",
+      "description": "Original public Facebook post URL."
+    },
+    "feedbackId": {
+      "type": ["string", "null"],
+      "description": "Facebook internal feedback target ID."
+    },
+    "sharerId": {
+      "type": ["string", "null"],
+      "description": "Facebook user ID of the person who shared the post."
+    },
+    "sharerName": {
+      "type": ["string", "null"],
+      "description": "Display name of the person who shared the post."
+    },
+    "sharerProfileUrl": {
+      "type": ["string", "null"],
+      "description": "Profile URL of the person who shared the post."
+    },
+    "sharePostId": {
+      "type": ["string", "null"],
+      "description": "Post ID of the outer reshare story."
+    },
+    "shareStoryId": {
+      "type": ["string", "null"],
+      "description": "GraphQL Story ID of the outer reshare."
+    },
+    "shareUrl": {
+      "type": ["string", "null"],
+      "description": "Canonical permalink of the outer reshare post."
+    },
+    "sharedAtUnix": {
+      "type": "integer",
+      "description": "Canonical share timestamp in Unix seconds (extracted from edge.node.creation_time)."
+    },
+    "sharedAtIso": {
+      "type": "string",
+      "description": "Share timestamp in ISO-8601 UTC format."
+    },
+    "sharedAtLocal": {
+      "type": ["string", "null"],
+      "description": "Share timestamp formatted in the requested local timezone."
+    },
+    "visibility": {
+      "type": ["string", "null"],
+      "description": "Declared privacy scope of the reshare (e.g. Public)."
+    },
+    "scrapedAt": {
+      "type": "string",
+      "description": "ISO-8601 UTC timestamp when the record was collected by the crawler."
+    }
+  },
+  "required": [
+    "originalPostUrl",
+    "sharedAtUnix",
+    "sharedAtIso",
+    "scrapedAt"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "actorSpecification": 1,
+  "name": "facebook-public-reshare-time-scraper",
+  "title": "Facebook Public Reshare Time Scraper",
+  "description": "Extract exact share timestamps (Unix & ISO) and public sharer profiles from Facebook public posts without login.",
+  "version": "1.0.0",
+  "meta": {
+    "templateId": "ts-playwright-camoufox"
+  },
+  "dockerfile": "./Dockerfile",
+  "input": "./input_schema.json",
+  "storages": {
+    "dataset": "./dataset_schema.json"
+  }
+}

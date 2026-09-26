@@ -1,0 +1,37 @@
+{
+  "name": "facebook-public-reshare-time-scraper",
+  "version": "1.0.0",
+  "description": "Apify Actor to extract exact share timestamps and sharer details from Facebook public post reshares without authentication.",
+  "main": "dist/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/main.js",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "apify",
+    "actor",
+    "crawlee",
+    "playwright",
+    "facebook",
+    "scraper",
+    "reshare",
+    "timestamp",
+    "graphql"
+  ],
+  "author": "Engineering Team",
+  "license": "ISC",
+  "dependencies": {
+    "apify": "^3.2.6",
+    "crawlee": "^3.12.2",
+    "playwright": "^1.50.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
+  }
+}

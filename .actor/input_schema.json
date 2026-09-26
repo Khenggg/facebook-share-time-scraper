@@ -1,0 +1,52 @@
+{
+  "title": "Facebook Public Reshare Time Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "postUrls": {
+      "title": "Facebook Post URLs",
+      "type": "array",
+      "description": "List of public Facebook post URLs to scrape reshares from.",
+      "editor": "stringList",
+      "prefill": [
+        "https://www.facebook.com/4914293075523572"
+      ]
+    },
+    "maxSharesPerPost": {
+      "title": "Max Shares Per Post",
+      "type": "integer",
+      "description": "Maximum number of public reshares to scrape for each post.",
+      "default": 1000,
+      "minimum": 1,
+      "maximum": 50000
+    },
+    "maxScrollAttempts": {
+      "title": "Max Scroll Attempts",
+      "type": "integer",
+      "description": "Safety threshold on the number of scroll actions inside the reshare dialog to prevent infinite loops.",
+      "default": 1000,
+      "minimum": 1
+    },
+    "scrollDelayMs": {
+      "title": "Scroll Delay (ms)",
+      "type": "integer",
+      "description": "Delay in milliseconds between scroll actions to allow lazy GraphQL loading.",
+      "default": 1000,
+      "minimum": 300,
+      "maximum": 10000
+    },
+    "timezone": {
+      "title": "Output Timezone",
+      "type": "string",
+      "description": "IANA Timezone identifier used to generate human-readable sharedAtLocal values (e.g. Asia/Ho_Chi_Minh).",
+      "default": "Asia/Ho_Chi_Minh"
+    },
+    "debug": {
+      "title": "Debug Mode",
+      "type": "boolean",
+      "description": "Enable verbose logging and save sanitized diagnostic network events.",
+      "default": false
+    }
+  },
+  "required": ["postUrls"]
+}
