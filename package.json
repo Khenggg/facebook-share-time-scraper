@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
     "smoke:live": "tsx scripts/smokeLive.ts",
-    "smoke:gui": "tsx scripts/smokeLive.ts --headed"
+    "smoke:gui": "tsx scripts/smokeLive.ts --headed",
+    "experiment:hybrid": "tsx scripts/experimentHybrid.ts"
   },
   "keywords": [
     "apify",

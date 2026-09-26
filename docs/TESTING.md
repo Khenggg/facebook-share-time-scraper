@@ -76,3 +76,21 @@ Live smoke tests run against designated public post URLs in an isolated test scr
 - Modal opens.
 - At least one `CometResharesFeedPaginationQuery` response intercepted.
 - At least one valid `ShareRecord` generated with `sharedAtUnix > 0`.
+
+---
+
+## 5. Hybrid Pagination Live Experiment Protocol
+
+Run Phase 1.5 hybrid direct replay experiment:
+
+```bash
+npm run experiment:hybrid -- <facebook-post-url>
+```
+
+**Assertions Verified**:
+1. Captures valid `CometResharesFeedPaginationQuery` request template after exactly one scroll.
+2. Extracts `end_cursor` from the initial response.
+3. Successfully replays the request in browser context via `page.evaluate(window.fetch)` without scrolling.
+4. Replayed response returns HTTP 200 and genuinely new `ShareRecord` items.
+5. Multi-page loop advances through subsequent cursors until `has_next_page === false`.
+6. Zero sensitive tokens, passwords, or cookies are logged or persisted.

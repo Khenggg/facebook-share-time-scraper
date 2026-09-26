@@ -78,3 +78,8 @@ flowchart TD
 - **`timestamp.ts`**: Converts Unix seconds to ISO-8601 UTC and localized string timestamps.
 - **`deduplicate.ts`**: Maintains an in-memory Set of seen identifiers, prioritizing `shareStoryId` > `sharePostId` > `shareUrl` > compound key.
 - **`logger.ts`**: Structured contextual logger with sensitive credential sanitization.
+
+### 6. Hybrid Direct GraphQL Engine (`src/graphql/captureRequestTemplate.ts`, `src/graphql/replayPagination.ts`)
+- **`captureRequestTemplate.ts`**: Captures real unauthenticated `CometResharesFeedPaginationQuery` POST form data emitted by the browser, preserving signed tokens in memory without hardcoding or logging. Provides `cloneRequestWithCursor` to immutably replace `variables.cursor` with next cursors.
+- **`replayPaginationRequest.ts`**: Dispatches subsequent pagination requests directly via `page.evaluate(window.fetch)` inside the active browser context. Achieves sub-second page retrieval with zero DOM scrolling, immune to DOM re-renders or virtual scroll staleness. Includes `CursorLoopDetector` to prevent pagination loops.
+

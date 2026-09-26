@@ -154,3 +154,47 @@ sequenceDiagram
    - `totalCollected >= maxSharesPerPost`: Configured limit met.
    - `scrollAttempts >= maxScrollAttempts`: Safety threshold reached.
    - `consecutiveEmptyAttempts >= 10`: Pagination stalled.
+
+---
+
+## 3. Phase 1.5 Hybrid Direct Pagination Flow
+
+In Phase 1.5, a faster, more resilient pagination architecture was experimentally proven:
+
+```
+[Browser Bootstrap]
+  ├─ 1. Open post in logged-out Chromium
+  ├─ 2. Dismiss login modal
+  ├─ 3. Scroll post to engagement & click reshare trigger
+  └─ 4. Perform EXACTLY ONE scroll in reshares dialog
+           │
+           ▼
+[Template Capture]
+  ├─ Capture browser's real POST /api/graphql/ request
+  ├─ Extract template form data (doc_id, lsd, variables)
+  └─ Extract initial end_cursor from first response
+           │
+           ▼
+[Direct Replay Loop (Zero Further UI Scrolls)]
+  ┌───────► Check page_info.has_next_page
+  │         ├─ If false -> Terminate cleanly
+  │         └─ If true  -> Proceed to replay
+  │               │
+  │               ▼
+  │         page.evaluate(window.fetch)
+  │         - Endpoint: /api/graphql/
+  │         - Body: cloned template with variables.cursor = nextCursor
+  │         - Credentials: 'include' (same anonymous context)
+  │               │
+  │               ▼
+  │         Parse response via parseReshares()
+  │         - Deduplicate new ShareRecords
+  │         - Update end_cursor
+  └───────────────┘
+```
+
+### Key Advantages of Hybrid Direct Replay
+1. **Dramatic Speed Improvement**: Eliminates UI scroll throttling, smooth scroll animations, and DOM rendering overhead.
+2. **Resilience to React Re-rendering**: Replay operates via network fetch in the page context, completely immune to DOM nodes detaching or re-mounting.
+3. **Canonical Timestamp Invariant Preserved**: Extracts canonical `edge.node.creation_time` directly from the raw GraphQL stream.
+

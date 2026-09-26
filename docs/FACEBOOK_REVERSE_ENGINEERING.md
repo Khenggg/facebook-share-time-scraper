@@ -138,6 +138,27 @@ A typical response from Facebook RelayModern:
 - Only scrolling this second container triggers Relay GraphQL `CometResharesFeedPaginationQuery` requests.
 - The crawler must never confuse or reuse the post container finder blindly across both phases.
 
+### 4.4 Dual Query Structure (Confirmed in Phase 1.5)
+Facebook uses two distinct GraphQL operations to load reshares:
+1. **Initial Dialog Render**:
+   - `fb_api_req_friendly_name = CometResharesDialogQuery`
+   - Returns initial reshares under `data.feedback.reshares.edges`
+2. **Subsequent Feed Pagination**:
+   - `fb_api_req_friendly_name = CometResharesFeedPaginationQuery`
+   - Returns paginated slices under `data.node.reshares.edges`
+
+Both operations share the exact canonical `edge.node.creation_time` timestamp path.
+
+---
+
+## 5. Direct GraphQL Replay via Browser Context (Phase 1.5)
+
+### Confirmed Findings
+- **Replay Viability**: Replaying the captured `CometResharesFeedPaginationQuery` using `page.evaluate(window.fetch)` in the existing browser context successfully paginates without any further UI scrolling.
+- **Minimal Mutation Rule**: Only `variables.cursor` needs to be mutated to `end_cursor`. All other fields (`doc_id`, `lsd`, `__spin_*`) must remain unmodified.
+- **Termination**: When the last slice is reached, `page_info.has_next_page` becomes `false`.
+
+
 ### 4.4 Batching & Stream Framing
 - Facebook responses arrive framed as single JSON, `for (;;);{"data":...}`, or newline-delimited multipart stream chunks.
 - The parser strips anti-hijack prefixes and parses all valid JSON objects while ignoring malformed lines.

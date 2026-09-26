@@ -84,3 +84,24 @@ This project operates entirely in **LOGGED-OUT mode** (`__user = 0`), opens the 
 | **`CometResharesFeedPaginationQuery`** | The Facebook GraphQL query responsible for fetching the next slice of reshares. |
 | **Logged-Out State** | Browser session without cookies or credentials, operating with `__user = 0`. |
 | **Compound Deduplication Key** | Fallback unique identifier: `sharerId + sharedAtUnix + shareUrl`. |
+| **Hybrid Direct Replay** | Capturing real browser pagination request template and paginating via browser-context `fetch` with new cursors without UI scrolling. |
+
+---
+
+## 5. Phase 1.5 Hybrid Pagination Findings
+
+### 5.1 Confirmed Facts (Live Experimentally Proven)
+- **Direct Cursor Pagination Works**: After the browser triggers the first `CometResharesFeedPaginationQuery` via a single scroll, replaying the exact request body inside the browser context via `page.evaluate(window.fetch)` with only `variables.cursor = end_cursor` successfully returns the next page of reshares.
+- **Zero Further UI Scrolling Required**: Consecutive pages (Page 2, Page 3, Page 4) can be retrieved via direct cursor replay without dispatching any additional scroll events or manipulating the DOM.
+- **Canonical Share Time Invariant Preserved**: Replayed responses return `data.node.reshares.edges[i].node.creation_time` with the identical second-precision timestamp structure as standard UI-scrolled responses.
+- **End-of-Feed Signal**: Replay cleanly signals `page_info.has_next_page = false` when all public reshares have been retrieved.
+
+### 5.2 Inferred Architecture
+- **Production Pipeline**:
+  `Browser Bootstrap -> Single UI Scroll -> Capture Request Template -> Direct Browser-Context Cursor Replay Loop -> Dataset`.
+  Fallback to UI-scroll mode if direct replay fails or returns unexpected schemas.
+
+### 5.3 Unknowns & Volatility Points
+- **Template Lifespan**: Request templates (with dynamic `lsd`, `doc_id`, `__spin_*`) are only guaranteed valid for the current browser session.
+- **Count Override Clamping**: Facebook's unauthenticated backend clamps or ignores attempts to arbitrarily increase `variables.count` beyond standard page sizes.
+- **Rate-Limiting**: High-concurrency direct fetches without delay may trigger unauthenticated rate limits faster than natural human-paced scrolling.
