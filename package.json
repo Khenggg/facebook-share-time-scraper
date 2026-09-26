@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
-    "smoke:live": "tsx scripts/smokeLive.ts"
+    "smoke:live": "tsx scripts/smokeLive.ts",
+    "smoke:gui": "tsx scripts/smokeLive.ts --headed"
   },
   "keywords": [
     "apify",

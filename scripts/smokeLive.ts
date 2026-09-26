@@ -14,22 +14,22 @@ import { ShareRecord } from '../src/models/shareRecord.js';
 import { logger } from '../src/utils/logger.js';
 
 async function runLiveSmokeTest() {
-  const targetUrl = process.argv[2];
-
-  if (!targetUrl) {
-    console.error('Usage: npm run smoke:live -- <facebook-public-post-url>');
-    process.exit(1);
-  }
+  const isHeaded = process.argv.includes('--headed') || process.env.HEADED === 'true';
+  const targetUrl =
+    process.argv.find((arg) => arg.startsWith('http')) ||
+    'https://www.facebook.com/TheYenOfficial/posts/pfbid02wsTeEnWsUxxZcFqHv7AYuRuaUnbPTRnVeDnuRJNvoM6k4DxZxhqK5JN2DYkVR6Npl';
 
   logger.setDebug(true);
   console.log('====================================================');
   console.log('FACEBOOK RESHARE SCRAPER - LIVE SMOKE TEST (PHASE 1)');
   console.log('Target URL:', targetUrl);
   console.log('Mode: Unauthenticated (Logged-Out, __user=0)');
+  console.log('Browser GUI Mode:', isHeaded ? 'HEADED (Visible Window)' : 'HEADLESS');
   console.log('====================================================\n');
 
   const browser = await chromium.launch({
-    headless: true,
+    headless: !isHeaded,
+    slowMo: isHeaded ? 400 : 0, // Slow down operations in GUI mode so user can comfortably watch
     args: [
       '--disable-blink-features=AutomationControlled',
       '--no-sandbox',
@@ -63,8 +63,12 @@ async function runLiveSmokeTest() {
     console.log('[POST] Opening public Facebook post...');
     await openPost(page, targetUrl);
 
+    if (isHeaded) await page.waitForTimeout(1000);
+
     // Step 1: Dismiss login modal if present
     await dismissLoginModal(page);
+
+    if (isHeaded) await page.waitForTimeout(1000);
 
     // Step 2: Identify post scroll container
     const { container: postContainer } = await findPostScrollContainer(page);
@@ -72,11 +76,15 @@ async function runLiveSmokeTest() {
     // Step 3: Scroll post container down to engagement section
     const { trigger } = await scrollPostToEngagement(postContainer, page);
 
+    if (isHeaded) await page.waitForTimeout(1000);
+
     // ==========================================
     // PHASE B — RESHARE SCROLL & GRAPHQL CAPTURE
     // ==========================================
     // Step 4: Open "People who shared this" dialog
     const reshareDialog = await openResharesDialog(page, trigger);
+
+    if (isHeaded) await page.waitForTimeout(1000);
 
     // Step 5: Find scroll container specifically inside the reshares dialog
     const { container: reshareContainer } = await findReshareScrollContainer(reshareDialog);
@@ -129,7 +137,7 @@ async function runLiveSmokeTest() {
         break;
       }
 
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(isHeaded ? 2000 : 1000);
     }
 
     if (collectedRecords.length === 0) {
@@ -144,6 +152,12 @@ async function runLiveSmokeTest() {
     console.log(`- Total valid ShareRecords extracted: ${collectedRecords.length}`);
     console.log(`- All records have sharedAtUnix > 0: ${collectedRecords.every((r) => r.sharedAtUnix > 0)}`);
     console.log('====================================================\n');
+
+    if (isHeaded) {
+      console.log('[GUI] Keeping browser open for 5 seconds so you can inspect the final view...');
+      await page.waitForTimeout(5000);
+    }
+
     await browser.close();
     process.exit(0);
   } catch (error) {
