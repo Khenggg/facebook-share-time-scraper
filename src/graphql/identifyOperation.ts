@@ -1,4 +1,4 @@
-import { COMET_RESHARES_QUERY_NAME, GRAPHQL_ENDPOINT_URL } from '../constants.js';
+import { COMET_RESHARES_QUERY_NAME, COMET_RESHARES_DIALOG_QUERY_NAME, GRAPHQL_ENDPOINT_URL } from '../constants.js';
 
 export interface GraphqlOperationInfo {
   friendlyName?: string;
@@ -72,7 +72,8 @@ export function identifyGraphqlOperation(postData: string | null | undefined): G
     }
   }
 
-  const isResharePagination = friendlyName === COMET_RESHARES_QUERY_NAME;
+  const isResharePagination =
+    friendlyName === COMET_RESHARES_QUERY_NAME || friendlyName === COMET_RESHARES_DIALOG_QUERY_NAME;
 
   return {
     friendlyName,
@@ -82,7 +83,7 @@ export function identifyGraphqlOperation(postData: string | null | undefined): G
 }
 
 /**
- * Checks whether request post data corresponds to CometResharesFeedPaginationQuery.
+ * Checks whether request post data corresponds to CometResharesFeedPaginationQuery or CometResharesDialogQuery.
  */
 export function isCometResharesRequest(postData: string | null | undefined): boolean {
   return identifyGraphqlOperation(postData).isResharePagination;
@@ -95,7 +96,7 @@ export function isResharesPayload(payload: unknown): boolean {
   if (!payload || typeof payload !== 'object') return false;
   const data = (payload as Record<string, unknown>).data as Record<string, unknown> | undefined;
   if (!data || typeof data !== 'object') return false;
-  const node = data.node as Record<string, unknown> | undefined;
+  const node = (data.node ?? data.feedback) as Record<string, unknown> | undefined;
   if (!node || typeof node !== 'object') return false;
   return 'reshares' in node && typeof node.reshares === 'object';
 }

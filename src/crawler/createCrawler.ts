@@ -38,5 +38,10 @@ export async function createCrawler(input: ActorInput, isHeadless: boolean = tru
     browserPoolOptions: {
       useFingerprints: false, // Maintain deterministic unauthenticated baseline
     },
+    preNavigationHooks: [
+      async ({ page }) => {
+        await page.setViewportSize({ width: 1280, height: 900 });
+      },
+    ],
   });
 }

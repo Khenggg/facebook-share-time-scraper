@@ -10,16 +10,12 @@ export async function scrollReshares(
   deltaY: number = 800
 ): Promise<{ previousTop: number; newTop: number }> {
   return await dialogOrContainer.evaluate((rootEl: HTMLElement, delta: number) => {
-    // Check candidate scrollable children
+    // Find scrollable container child element
     const elements = Array.from(rootEl.querySelectorAll<HTMLElement>('*'));
     let target: HTMLElement = rootEl;
-    let maxDiff = rootEl.scrollHeight - rootEl.clientHeight;
+    let maxDiff = -1;
 
     for (const cand of elements) {
-      if (cand.getAttribute('role') === 'feed') {
-        target = cand;
-        break;
-      }
       const style = window.getComputedStyle(cand);
       const isScroll =
         style.overflowY === 'auto' ||
@@ -27,7 +23,7 @@ export async function scrollReshares(
         style.overflow === 'auto' ||
         style.overflow === 'scroll';
       const diff = cand.scrollHeight - cand.clientHeight;
-      if ((diff > 0 && cand.clientHeight > 100) || isScroll) {
+      if (isScroll && cand.clientHeight > 100) {
         if (diff > maxDiff) {
           maxDiff = diff;
           target = cand;
@@ -36,7 +32,9 @@ export async function scrollReshares(
     }
 
     const previousTop = target.scrollTop;
-    target.scrollBy({ top: delta, behavior: 'smooth' });
+    // Scroll directly to bottom to ensure bottom threshold is crossed
+    target.scrollTop = target.scrollHeight;
+    target.scrollBy({ top: delta, behavior: 'instant' as ScrollBehavior });
     target.dispatchEvent(new Event('scroll', { bubbles: true }));
 
     return {

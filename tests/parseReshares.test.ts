@@ -116,4 +116,58 @@ describe('parseReshares Contract Tests', () => {
     expect(rec.shareUrl).toBe('https://facebook.com/custom_url');
     expect(rec.visibility).toBe('Public');
   });
+
+  it('correctly parses initial dialog payload where root is data.feedback (CometResharesDialogQuery)', () => {
+    const dialogPayload = {
+      data: {
+        feedback: {
+          id: 'ZmVlZGJhY2s6Nzc1MTMwOTk4NDAwMDYw',
+          reshares: {
+            edges: [
+              {
+                node: {
+                  post_id: 'post_dialog_1',
+                  creation_time: 1774006209,
+                  comet_sections: {
+                    context_layout: {
+                      story: {
+                        actors: [{ id: 'vu_hoa_id', name: 'Vu Hoa', profile_url: 'https://fb.com/vuhoa' }],
+                      },
+                    },
+                  },
+                },
+              },
+              {
+                node: {
+                  post_id: 'post_dialog_2',
+                  creation_time: 1774888059,
+                  comet_sections: {
+                    context_layout: {
+                      story: {
+                        actors: [{ id: 'luong_hien_id', name: 'Lương Văn Hiển', profile_url: 'https://fb.com/luonghien' }],
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+            page_info: {
+              has_next_page: true,
+              end_cursor: 'cursor_dialog_abc',
+            },
+          },
+        },
+      },
+    };
+
+    const result = parseReshares(dialogPayload, originalPostUrl);
+    expect(result.records).toHaveLength(2);
+    expect(result.records[0].sharerName).toBe('Vu Hoa');
+    expect(result.records[0].sharedAtUnix).toBe(1774006209);
+    expect(result.records[1].sharerName).toBe('Lương Văn Hiển');
+    expect(result.records[1].sharedAtUnix).toBe(1774888059);
+    expect(result.pageInfo?.has_next_page).toBe(true);
+    expect(result.pageInfo?.end_cursor).toBe('cursor_dialog_abc');
+    expect(result.feedbackId).toBe('ZmVlZGJhY2s6Nzc1MTMwOTk4NDAwMDYw');
+  });
 });

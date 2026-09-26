@@ -5,6 +5,7 @@
 export const GRAPHQL_ENDPOINT_URL = 'https://www.facebook.com/api/graphql/';
 
 export const COMET_RESHARES_QUERY_NAME = 'CometResharesFeedPaginationQuery';
+export const COMET_RESHARES_DIALOG_QUERY_NAME = 'CometResharesDialogQuery';
 
 export const RELAY_MODERN_CLASS = 'RelayModern';
 

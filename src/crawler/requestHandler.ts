@@ -148,6 +148,7 @@ export async function createRequestHandler(input: ActorInput) {
           rawResponse = await interceptor.waitForResponse(200);
         } else {
           await scrollReshares(reshareContainer, 800);
+          await page.keyboard.press('PageDown').catch(() => {});
           rawResponse = await interceptor.waitForResponse(scrollDelay + 6000);
         }
 

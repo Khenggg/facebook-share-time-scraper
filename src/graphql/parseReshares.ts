@@ -30,7 +30,7 @@ export function parseReshares(
   }
 
   const typedPayload = payload as CometResharesResponse;
-  const node = typedPayload.data?.node;
+  const node = typedPayload.data?.node ?? typedPayload.data?.feedback;
   if (!node) {
     return result;
   }

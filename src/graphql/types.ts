@@ -68,6 +68,7 @@ export interface RawFeedbackNode {
 export interface CometResharesResponse {
   data?: {
     node?: RawFeedbackNode;
+    feedback?: RawFeedbackNode;
     [key: string]: unknown;
   };
   extensions?: unknown;
