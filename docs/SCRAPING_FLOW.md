@@ -1,6 +1,6 @@
 # Scraping Lifecycle & Execution Flow
 
-This document details the exact runtime lifecycle of the `facebook-share-time-scraper`.
+This document details the exact runtime lifecycle of the `facebook-share-time-scraper`, reflecting the confirmed **Two-Phase Scroll Architecture** in unauthenticated logged-out sessions.
 
 ---
 
@@ -10,7 +10,7 @@ This document details the exact runtime lifecycle of the `facebook-share-time-sc
 sequenceDiagram
     autonumber
     actor User as Apify Runner
-    participant Main as src/main.ts
+    participant Main as src/crawler/requestHandler.ts
     participant Browser as Playwright Page
     participant DOM as Facebook DOM
     participant Network as Network Interceptor
@@ -21,29 +21,43 @@ sequenceDiagram
     Main->>Browser: Launch Chromium (Fresh incognito, __user=0)
     
     loop For each post URL
+        Note over Main,DOM: PHASE A — POST SCROLL & TRIGGER DISCOVERY
         Main->>Browser: page.goto(postUrl)
         Browser->>DOM: Load public post view
-        Main->>Browser: Attach network listener for /api/graphql/
-        Main->>DOM: Dismiss login prompts / cookie popups if present
         
-        Main->>DOM: Locate reshare trigger (e.g. "X shares" / "X lượt chia sẻ")
-        alt Reshare trigger found
-            Main->>DOM: Click reshare trigger
-            DOM->>DOM: Render reshare dialog modal (role="dialog")
-        else Trigger missing
-            Main->>Main: Emit RESHARE_TRIGGER_NOT_FOUND error
+        opt Unauthenticated Login Modal Present
+            Main->>DOM: Detect login modal (Auth Gate)
+            Main->>DOM: Click close button / dismiss modal
+            DOM-->>Main: [AUTH_GATE] Login modal dismissed
         end
 
-        Main->>DOM: Identify internal scroll container
+        Main->>DOM: Identify Post Detail Container (Post Dialog / Main Area)
         
-        loop Scroll & Paginate
-            Main->>DOM: Scroll container downward
+        loop Scroll Post to Engagement Section
+            Main->>DOM: scrollBy(500) downward inside Post Container
+            Main->>DOM: Check visibility of share-count trigger ("X shares" / "X lượt chia sẻ")
+            alt Trigger visible
+                Note over Main: [POST] Engagement section reached
+            end
+        end
+
+        Note over Main,DOM: PHASE B — RESHARE SCROLL & GRAPHQL CAPTURE
+        Main->>Browser: Attach network listener for /api/graphql/
+        Main->>DOM: Click reshare trigger (strictly avoiding "Share" action button)
+        DOM->>DOM: Render "People who shared this" modal (role="dialog")
+        Note over Main: [DIALOG] People who shared this opened
+
+        Main->>DOM: Identify Reshare Scroll Container inside reshares dialog
+        Note over Main: [DIALOG] Reshare scroll container identified
+        
+        loop Scroll Reshare Container & Paginate
+            Main->>DOM: scrollReshares(reshareContainer, 800)
             DOM->>Browser: Dispatch GraphQL request (RelayModern, CometResharesFeedPaginationQuery)
             Browser-->>Network: Response received (/api/graphql/)
             Network->>Parser: Send raw response payload
-            Parser->>Parser: Validate friendly name
-            Parser->>Parser: Extract edges[].node.creation_time
-            Parser->>Parser: Extract actor identity & post URLs
+            Parser->>Parser: Validate friendly name (CometResharesFeedPaginationQuery)
+            Parser->>Parser: Extract edge.node.creation_time (CANONICAL)
+            Parser->>Parser: Extract sharer details & permalink
             Parser->>Main: Return parsed ShareRecords + PageInfo
             Main->>Storage: Deduplicate & push new ShareRecords
             
@@ -61,46 +75,82 @@ sequenceDiagram
 
 ## 2. Step-by-Step Breakdown
 
-### Step 1: Context Initialization
-- Launch unauthenticated Chromium context.
-- Ensure no persistent cookies, local storage, or cached credentials exist.
+### Phase A: Post Scroll & Trigger Discovery
 
-### Step 2: Post Navigation & Wall Handling
-- Navigate directly to the Facebook post URL.
-- Wait for the post container to mount.
-- If Facebook presents a full-screen login barrier or modal dialog, attempt to close or bypass it using non-destructive selectors.
+1. **Clean Logged-Out Navigation (`openPost`)**:
+   - Launches a pristine Chromium context without cookies, local storage, or session tokens (`__user = 0`).
+   - Navigates to target public post URL.
 
-### Step 3: Triggering Reshares Modal
-- Inspect the post footer for the share count element.
-- Click the element to open the "People who shared this" dialog (`role="dialog"`).
-- Wait for the dialog container to render.
+2. **Login Modal Dismissal (`dismissLoginModal`)**:
+   - Facebook routinely presents an unauthenticated login modal ("See more on Facebook", "Log In", "Đăng nhập") covering the post.
+   - **Crucial Rule**: This modal is **EXPECTED behavior** and is NOT treated as `FACEBOOK_BLOCKED`.
+   - The crawler detects this modal and dismisses it via its close button (`[aria-label="Close"]`, `[aria-label="Đóng"]`).
+   - Logs:
+     ```text
+     [AUTH_GATE] Login modal detected
+     [AUTH_GATE] Login modal dismissed
+     ```
 
-### Step 4: Network Interception Activation
-- Playwright's `page.on('response')` catches all POST requests to `https://www.facebook.com/api/graphql/`.
-- Inspect the request body to verify:
-  ```text
-  fb_api_req_friendly_name = CometResharesFeedPaginationQuery
-  ```
+3. **Identify Post Container (`findPostScrollContainer`)**:
+   - After modal dismissal, Facebook displays the post inside a post-detail dialog (`div[role="dialog"]:has(div[role="article"])`) or main feed container.
+   - Measures and logs:
+     ```text
+     [POST] Post dialog detected
+     [POST] Post scroll container:
+            clientHeight=...
+            scrollHeight=...
+     ```
 
-### Step 5: Lazy Loading via Scoped Scrolling
-- Retrieve the bounding element of the reshares scroll list inside the dialog.
-- Perform gradual scroll actions (`element.scrollTop += delta`).
-- Introduce a configurable throttle (`scrollDelayMs`) to allow Facebook frontend to dispatch subsequent queries.
+4. **Scroll Post to Engagement (`scrollPostToEngagement`)**:
+   - Engagement counters (likes, comments, share counter) reside at the bottom of the post content and are not initially visible in the viewport.
+   - Progressively scrolls the **POST CONTAINER** downward until the share-count element (`350 shares`, `350 lượt chia sẻ`) is detected.
+   - Strictly avoids the naked `Share` / `Chia sẻ` action button (which triggers the composer).
+   - Logs:
+     ```text
+     [POST] Engagement section reached
+     [DIALOG] Reshare trigger detected: "350 shares"
+     ```
 
-### Step 6: Response Parsing & Canonical Extraction
-- Intercepted GraphQL chunks are decoded.
-- Each edge's `edge.node.creation_time` is extracted as the canonical share timestamp.
-- Any nested `attached_story.creation_time` is strictly ignored.
-- The actor's profile details and permalink are parsed.
+---
 
-### Step 7: Deduplication & Pushing Data
-- Compute the deduplication key.
-- Discard already seen keys.
-- Call `Actor.pushData(record)` for all new unique records.
+### Phase B: Reshare Scroll & GraphQL Capture
 
-### Step 8: Multi-Signal Termination
-The crawler terminates pagination for a post when any of the following occur:
-1. **`has_next_page === false`**: Facebook indicates no further public reshares exist.
-2. **`totalCollected >= maxSharesPerPost`**: User-configured quota met.
-3. **`scrollAttempts >= maxScrollAttempts`**: Hard limit reached to prevent infinite scrolling.
-4. **`consecutiveEmptyAttempts >= threshold`**: Scroll actions no longer trigger queries or yield new items (stalled pagination).
+5. **Open Reshares Dialog (`openResharesDialog`)**:
+   - Clicks the verified share-count element.
+   - Waits for the second modal dialog: **"People who shared this"** (`role="dialog"`).
+   - Logs:
+     ```text
+     [DIALOG] People who shared this opened
+     ```
+
+6. **Identify Reshare Scroll Container (`findReshareScrollContainer`)**:
+   - Locates the inner scrollable container (`scrollHeight > clientHeight`, `overflow-y: auto/scroll`) specifically inside the reshares dialog.
+   - This container is **completely distinct** from the post container in Phase A.
+   - Logs:
+     ```text
+     [DIALOG] Reshare scroll container:
+            clientHeight=...
+            scrollHeight=...
+     ```
+
+7. **Network Listener Activation & Synchronization (`ReshareNetworkInterceptor`)**:
+   - Listens to all POST requests to `https://www.facebook.com/api/graphql/`.
+   - Detects `fb_api_req_friendly_name = CometResharesFeedPaginationQuery`.
+   - Bounded async barrier synchronizes scrolling with response delivery to eliminate flaky timeouts.
+
+8. **Reshare Feed Lazy Loading (`scrollReshares`)**:
+   - Smoothly scrolls the reshare container downward to trigger Relay GraphQL pagination queries.
+   - Logs:
+     ```text
+     [GRAPHQL] CometResharesFeedPaginationQuery detected
+     [GRAPHQL] Parsed 1 response chunk
+     [PAGE] Edges: 1 | New records: 1
+     [SHARE] { ... }
+     ```
+
+9. **Multi-Signal Termination**:
+   The crawler terminates pagination for a post when any of the following occur:
+   - `has_next_page === false`: Facebook reached the end of public reshares.
+   - `totalCollected >= maxSharesPerPost`: Configured limit met.
+   - `scrollAttempts >= maxScrollAttempts`: Safety threshold reached.
+   - `consecutiveEmptyAttempts >= 10`: Pagination stalled.

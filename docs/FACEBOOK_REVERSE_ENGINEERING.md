@@ -119,8 +119,25 @@ A typical response from Facebook RelayModern:
 
 ---
 
-## 4. UI Behavior Observations
+## 4. UI Behavior Observations & Two-Phase Scroll Architecture
 
-- **Login Wall Evasion**: Accessing the post in a pristine incognito context does not immediately trigger an impassable login modal. An unobtrusive banner or modal may appear, which can be closed or ignored while interacting with post elements.
-- **Scroll Container Mechanics**: Facebook embeds the reshares feed inside a modal dialog container (`role="dialog"`). The outer browser window does not scroll. Instead, scrolling must be targeted directly at the scrollable element within the dialog.
-- **Batching & Stream Framing**: Some Facebook responses arrive framed as `for (;;);{"data":...}` or newline-delimited multipart chunks. The parser must clean control prefixes before parsing JSON.
+### 4.1 Login Modal (Auth Gate) — Expected Behavior
+- When opening a public Facebook post in a fresh logged-out/incognito browser, Facebook frequently overlays an unauthenticated login modal ("See more on Facebook", "Log In", "Đăng nhập").
+- **Crucial Rule**: This modal is **EXPECTED behavior** and is NOT treated as `FACEBOOK_BLOCKED`.
+- The crawler must locate and click its close button (`[aria-label="Close"]`, `[aria-label="Đóng"]`).
+
+### 4.2 Phase A: Post Scroll to Engagement Section
+- After dismissing the login modal, Facebook displays the post inside a post-detail dialog/container (`div[role="dialog"]:has(div[role="article"])`) or main area.
+- The engagement section (reactions, comments, and share counter) is typically hidden below the initial fold.
+- The crawler must scroll this **POST CONTAINER** downward until the share-count element (`350 shares`, `350 lượt chia sẻ`) becomes visible.
+- **Strict Distinction**: Never click the naked `Share` or `Chia sẻ` action button (which triggers re-posting / composer).
+
+### 4.3 Phase B: Reshares Dialog & Dedicated Scroll Container
+- Clicking the verified share-count element triggers Facebook to open the separate modal: **"People who shared this"**.
+- This creates a **SECOND independent scrollable container** (`Reshare Scroll Container`).
+- Only scrolling this second container triggers Relay GraphQL `CometResharesFeedPaginationQuery` requests.
+- The crawler must never confuse or reuse the post container finder blindly across both phases.
+
+### 4.4 Batching & Stream Framing
+- Facebook responses arrive framed as single JSON, `for (;;);{"data":...}`, or newline-delimited multipart stream chunks.
+- The parser strips anti-hijack prefixes and parses all valid JSON objects while ignoring malformed lines.

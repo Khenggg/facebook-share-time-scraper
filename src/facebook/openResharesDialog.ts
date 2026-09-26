@@ -1,43 +1,44 @@
 import type { Page, Locator } from 'playwright';
 import { RESHARE_SELECTORS } from './selectors.js';
+import { findReshareTrigger } from './findReshareTrigger.js';
 import { ScraperError } from '../models/errors.js';
 import { logger } from '../utils/logger.js';
 
 /**
- * Finds and clicks the reshares count trigger on a public Facebook post to open the reshares modal.
+ * Clicks the identified reshare trigger to open the "People who shared this" dialog (Phase B).
+ *
+ * @param page Playwright Page
+ * @param trigger Optional pre-located trigger. If omitted, attempts to find it.
+ * @returns Locator of the opened reshares modal dialog.
  */
-export async function openResharesDialog(page: Page): Promise<Locator> {
-  logger.dialog('Attempting to locate reshare counter trigger...');
+export async function openResharesDialog(page: Page, trigger?: Locator): Promise<Locator> {
+  let targetTrigger = trigger;
 
-  let triggerFound: Locator | null = null;
-
-  for (const selector of RESHARE_SELECTORS.shareCountTriggers) {
-    try {
-      const candidate = page.locator(selector).first();
-      if (await candidate.isVisible({ timeout: 2000 })) {
-        triggerFound = candidate;
-        break;
-      }
-    } catch {
-      // Continue to next selector candidate
+  if (!targetTrigger) {
+    const found = await findReshareTrigger(page);
+    if (!found) {
+      throw new ScraperError(
+        'RESHARE_TRIGGER_NOT_FOUND',
+        'Could not find clickable reshares counter on the post.',
+        'Check if the post has public reshares or if Facebook updated its share count markup.'
+      );
     }
+    targetTrigger = found.trigger;
   }
 
-  if (!triggerFound) {
-    throw new ScraperError(
-      'RESHARE_TRIGGER_NOT_FOUND',
-      'Could not find clickable reshares counter on the post.',
-      'Check if the post has public reshares or if Facebook updated its share count markup.'
-    );
-  }
+  // Scroll trigger element into view and click
+  await targetTrigger.scrollIntoViewIfNeeded().catch(() => {});
+  await page.waitForTimeout(400);
 
-  logger.dialog('Reshare trigger found. Clicking to open dialog...');
-  await triggerFound.click();
+  logger.debug('[DIALOG] Clicking reshare trigger to open modal...');
+  await targetTrigger.click({ timeout: 5000 });
 
-  // Wait for dialog to appear
-  const dialog = page.locator(RESHARE_SELECTORS.dialog.roleDialog).first();
+  // Locate the reshares dialog
+  // If multiple dialogs exist (e.g. post dialog + reshares dialog), select the top/most recent one
+  const reshareDialogLocator = page.locator(RESHARE_SELECTORS.reshareDialog.roleDialog).last();
+
   try {
-    await dialog.waitFor({ state: 'visible', timeout: 8000 });
+    await reshareDialogLocator.waitFor({ state: 'visible', timeout: 10000 });
   } catch {
     throw new ScraperError(
       'RESHARE_DIALOG_NOT_OPENED',
@@ -46,6 +47,6 @@ export async function openResharesDialog(page: Page): Promise<Locator> {
     );
   }
 
-  logger.dialog('Reshares modal dialog confirmed visible.');
-  return dialog;
+  console.log('[DIALOG] People who shared this opened');
+  return reshareDialogLocator;
 }

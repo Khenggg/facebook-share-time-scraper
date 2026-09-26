@@ -38,7 +38,16 @@ This project operates entirely in **LOGGED-OUT mode** (`__user = 0`), opens the 
   └── attached_story ──────► [ATTACHED ORIGINAL POST]
           └── creation_time ─► [ORIGINAL POST TIMESTAMP] (e.g. 1753949084) - DO NOT USE!
   ```
-- **Lazy Loading**: Reshare items are lazy loaded only when the inner scroll container of the dialog is scrolled. Scrolling the outer `window` or `document.body` produces zero pagination requests.
+- **Two Distinct Scroll Phases (Confirmed Logged-Out UI Flow)**:
+  1. **Phase A (Post Scroll)**:
+     - Facebook may present an initial unauthenticated Login Modal over the post. This is **EXPECTED behavior** and is NOT considered `FACEBOOK_BLOCKED`. The crawler dismisses it via its close button.
+     - Facebook displays the post inside a post-detail dialog/container. The engagement section (like/comment/share counts) is located further down.
+     - The crawler must first scroll the **POST CONTAINER** downward until the share count trigger (`X shares` / `X lượt chia sẻ`) becomes visible, strictly distinguishing it from the `Share` action button.
+  2. **Phase B (Reshare Scroll)**:
+     - Clicking the share count trigger opens the separate **"People who shared this"** modal dialog.
+     - This creates a **SECOND scrollable container** (`Reshare Scroll Container`).
+     - Scrolling this inner container triggers `CometResharesFeedPaginationQuery` GraphQL responses.
+     - The crawler must NEVER reuse the post container finder blindly for both phases.
 
 ### 2.2 Assumptions (Valid for Current Implementation)
 - As long as the post is publicly accessible, Facebook allows unauthenticated browsers to read public reshares up to Facebook's internal public listing cap.
