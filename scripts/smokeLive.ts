@@ -60,13 +60,18 @@ async function runLiveSmokeTest() {
     // ==========================================
     // PHASE A — POST SCROLL & TRIGGER DISCOVERY
     // ==========================================
+    const fs = await import('node:fs');
+    fs.mkdirSync('screenshots', { recursive: true });
+
     console.log('[POST] Opening public Facebook post...');
     await openPost(page, targetUrl);
+    await page.screenshot({ path: 'screenshots/01_post_loaded.png' });
 
     if (isHeaded) await page.waitForTimeout(1000);
 
     // Step 1: Dismiss login modal if present
     await dismissLoginModal(page);
+    await page.screenshot({ path: 'screenshots/02_login_dismissed.png' });
 
     if (isHeaded) await page.waitForTimeout(1000);
 
@@ -75,6 +80,7 @@ async function runLiveSmokeTest() {
 
     // Step 3: Scroll post container down to engagement section
     const { trigger } = await scrollPostToEngagement(postContainer, page);
+    await page.screenshot({ path: 'screenshots/03_engagement_section.png' });
 
     if (isHeaded) await page.waitForTimeout(1000);
 
@@ -83,6 +89,7 @@ async function runLiveSmokeTest() {
     // ==========================================
     // Step 4: Open "People who shared this" dialog
     const reshareDialog = await openResharesDialog(page, trigger);
+    await page.screenshot({ path: 'screenshots/04_reshares_dialog.png' });
 
     if (isHeaded) await page.waitForTimeout(1000);
 
@@ -99,6 +106,8 @@ async function runLiveSmokeTest() {
         await scrollReshares(reshareContainer, 800);
         rawResponse = await interceptor.waitForResponse(6000);
       }
+
+      await page.screenshot({ path: `screenshots/05_scroll_attempt_${attempt}.png` });
 
       if (!rawResponse) {
         console.log(`[SCROLL] No GraphQL pagination response received on scroll #${attempt}`);
