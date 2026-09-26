@@ -67,6 +67,12 @@
       "default": "AUTO",
       "enum": ["AUTO", "HYBRID", "UI_SCROLL"],
       "enumTitles": ["AUTO (Hybrid Replay with UI Scroll Fallback)", "HYBRID (Fast Direct Cursor Replay)", "UI_SCROLL (Browser Scroll Per Page)"]
+    },
+    "maxRunTimeSeconds": {
+      "title": "Max Run Time Per Post (seconds)",
+      "type": "integer",
+      "description": "Optional time limit in seconds per post for scraping reshares.",
+      "minimum": 10
     }
   },
   "required": ["postUrls"]

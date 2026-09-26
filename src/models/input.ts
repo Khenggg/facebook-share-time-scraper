@@ -56,5 +56,11 @@ export interface ActorInput {
    * Default: "AUTO"
    */
   paginationMode?: 'AUTO' | 'HYBRID' | 'UI_SCROLL';
+
+  /**
+   * Optional maximum runtime in seconds per post before graceful termination.
+   */
+  maxRunTimeSeconds?: number;
 }
+
 

@@ -163,11 +163,22 @@ export async function createRequestHandler(input: ActorInput) {
   const scrollDelay = input.scrollDelayMs ?? DEFAULT_SCROLL_DELAY_MS;
   const timezone = input.timezone ?? 'Asia/Ho_Chi_Minh';
   const paginationMode = input.paginationMode ?? 'AUTO';
+  const maxRunTimeSeconds = input.maxRunTimeSeconds;
 
   return async (context: PlaywrightCrawlingContext) => {
     const { request, page } = context;
     const postUrl = request.url;
-    logger.post(postUrl, `Opening public Facebook post (mode: ${paginationMode})...`);
+    const startTimeMs = Date.now();
+
+    const isTimeLimitReached = (): boolean => {
+      if (maxRunTimeSeconds && (Date.now() - startTimeMs) >= maxRunTimeSeconds * 1000) {
+        logger.dialog(`[TIME_LIMIT] Reached maxRunTimeSeconds limit (${maxRunTimeSeconds}s). Gracefully stopping...`);
+        return true;
+      }
+      return false;
+    };
+
+    logger.post(postUrl, `Opening public Facebook post (mode: ${paginationMode}${maxRunTimeSeconds ? `, timeout: ${maxRunTimeSeconds}s` : ''})...`);
 
     try {
       // ==========================================
@@ -253,7 +264,7 @@ export async function createRequestHandler(input: ActorInput) {
         let paginationState = createInitialPaginationState();
 
         for (let attempt = startAttempt; attempt <= maxScrolls; attempt++) {
-          if (collectedRecords.length >= maxShares) break;
+          if (collectedRecords.length >= maxShares || isTimeLimitReached()) break;
           logger.scroll(attempt, maxScrolls);
 
           let rawResponse: string | null = null;
@@ -285,7 +296,7 @@ export async function createRequestHandler(input: ActorInput) {
             const uniqueRecords = dedupeFilter.filterBatch(parsed.records);
             for (const record of uniqueRecords) {
               await emitRecord(record);
-              if (collectedRecords.length >= maxShares) break;
+              if (collectedRecords.length >= maxShares || isTimeLimitReached()) break;
             }
 
             logger.page({
@@ -302,9 +313,11 @@ export async function createRequestHandler(input: ActorInput) {
               maxShares,
               maxScrolls
             );
+
+            if (isTimeLimitReached()) break;
           }
 
-          if (paginationState.isTerminated || collectedRecords.length >= maxShares) {
+          if (paginationState.isTerminated || collectedRecords.length >= maxShares || isTimeLimitReached()) {
             break;
           }
 
@@ -389,7 +402,8 @@ export async function createRequestHandler(input: ActorInput) {
               hasNextPage &&
               currentCursor &&
               collectedRecords.length < maxShares &&
-              directIteration < maxScrolls
+              directIteration < maxScrolls &&
+              !isTimeLimitReached()
             ) {
               directIteration++;
               logger.dialog(
@@ -426,7 +440,7 @@ export async function createRequestHandler(input: ActorInput) {
               const uniqueRecords = dedupeFilter.filterBatch(replayedRecords);
               for (const record of uniqueRecords) {
                 await emitRecord(record);
-                if (collectedRecords.length >= maxShares) break;
+                if (collectedRecords.length >= maxShares || isTimeLimitReached()) break;
               }
 
               logger.page({
