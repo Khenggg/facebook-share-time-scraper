@@ -1,5 +1,5 @@
 import type { PlaywrightCrawlingContext } from 'crawlee';
-import type { Page } from 'playwright';
+import type { Page, Request as PlaywrightRequest } from 'playwright';
 import { Actor } from 'apify';
 import { ActorInput } from '../models/input.js';
 import { ShareRecord } from '../models/shareRecord.js';
@@ -15,18 +15,53 @@ import { isFacebookGraphqlUrl, identifyGraphqlOperation } from '../graphql/ident
 import { parseGraphqlResponse } from '../graphql/parseGraphqlResponse.js';
 import { parseReshares } from '../graphql/parseReshares.js';
 import { createInitialPaginationState, updatePaginationState } from '../graphql/pagination.js';
+import {
+  parseCapturedTemplate,
+  getSafeTemplateMetadata,
+  hashCursor,
+} from '../graphql/captureRequestTemplate.js';
+import {
+  replayPaginationRequest,
+  CursorLoopDetector,
+} from '../graphql/replayPagination.js';
 import { DeduplicationFilter } from '../utils/deduplicate.js';
 import { logger } from '../utils/logger.js';
-import { DEFAULT_MAX_SCROLL_ATTEMPTS, DEFAULT_SCROLL_DELAY_MS } from '../constants.js';
+import {
+  DEFAULT_MAX_SCROLL_ATTEMPTS,
+  DEFAULT_SCROLL_DELAY_MS,
+  COMET_RESHARES_QUERY_NAME,
+  COMET_RESHARES_DIALOG_QUERY_NAME,
+} from '../constants.js';
 
 /**
- * Coordinates event-driven network interception for CometResharesFeedPaginationQuery.
+ * Captured HTTP payload pair for pagination queries.
+ */
+export interface CapturedPaginationPair {
+  postData: string;
+  responseBody: string;
+}
+
+/**
+ * Coordinates event-driven network interception for Facebook Reshares GraphQL queries:
+ * - CometResharesDialogQuery: Initial modal mount responses
+ * - CometResharesFeedPaginationQuery: Subsequent pagination requests & responses
  */
 export class ReshareNetworkInterceptor {
-  private readonly pendingWaiters: Array<(rawBody: string) => void> = [];
-  private readonly capturedBodies: string[] = [];
+  private readonly pendingWaiters: Array<(pair: CapturedPaginationPair) => void> = [];
+  private readonly capturedPaginationPairs: CapturedPaginationPair[] = [];
+  private readonly capturedDialogBodies: string[] = [];
+  private readonly requestPostDataMap = new Map<PlaywrightRequest, string>();
 
   public attach(page: Page): void {
+    page.on('request', (req) => {
+      if (isFacebookGraphqlUrl(req.url()) && req.method() === 'POST') {
+        const data = req.postData();
+        if (data) {
+          this.requestPostDataMap.set(req, data);
+        }
+      }
+    });
+
     page.on('response', async (response) => {
       const url = response.url();
       if (!isFacebookGraphqlUrl(url)) return;
@@ -34,36 +69,53 @@ export class ReshareNetworkInterceptor {
       const request = response.request();
       if (request.method() !== 'POST') return;
 
-      const postData = request.postData();
+      const postData = this.requestPostDataMap.get(request) || request.postData() || '';
       const opInfo = identifyGraphqlOperation(postData);
 
-      if (!opInfo.isResharePagination) return;
-
-      console.log('[GRAPHQL] CometResharesFeedPaginationQuery detected');
-
-      try {
-        const rawBody = await response.text();
-        if (this.pendingWaiters.length > 0) {
-          const resolve = this.pendingWaiters.shift()!;
-          resolve(rawBody);
-        } else {
-          this.capturedBodies.push(rawBody);
+      // 1. Capture initial modal dialog query
+      if (opInfo.friendlyName === COMET_RESHARES_DIALOG_QUERY_NAME) {
+        try {
+          const rawBody = await response.text();
+          this.capturedDialogBodies.push(rawBody);
+        } catch (err) {
+          logger.debug(`[GRAPHQL] Could not read dialog response text: ${String(err)}`);
         }
-      } catch (err) {
-        logger.debug(`[GRAPHQL] Could not read response text: ${String(err)}`);
+        return;
+      }
+
+      // 2. Capture pagination query (CometResharesFeedPaginationQuery)
+      if (opInfo.isResharePagination || opInfo.friendlyName === COMET_RESHARES_QUERY_NAME) {
+        console.log('[GRAPHQL] CometResharesFeedPaginationQuery detected');
+        try {
+          const responseBody = await response.text();
+          const pair: CapturedPaginationPair = { postData, responseBody };
+
+          if (this.pendingWaiters.length > 0) {
+            const resolve = this.pendingWaiters.shift()!;
+            resolve(pair);
+          } else {
+            this.capturedPaginationPairs.push(pair);
+          }
+        } catch (err) {
+          logger.debug(`[GRAPHQL] Could not read pagination response text: ${String(err)}`);
+        }
       }
     });
   }
 
+  public getCapturedDialogBodies(): string[] {
+    return [...this.capturedDialogBodies];
+  }
+
   /**
-   * Bounded wait for the next captured pagination response body.
+   * Bounded wait for the next captured pagination request/response pair.
    */
-  public async waitForResponse(timeoutMs: number = 7000): Promise<string | null> {
-    if (this.capturedBodies.length > 0) {
-      return this.capturedBodies.shift()!;
+  public async waitForPagination(timeoutMs: number = 7000): Promise<CapturedPaginationPair | null> {
+    if (this.capturedPaginationPairs.length > 0) {
+      return this.capturedPaginationPairs.shift()!;
     }
 
-    return new Promise<string | null>((resolve) => {
+    return new Promise<CapturedPaginationPair | null>((resolve) => {
       const timer = setTimeout(() => {
         const idx = this.pendingWaiters.indexOf(resolveWrapper);
         if (idx !== -1) {
@@ -72,36 +124,50 @@ export class ReshareNetworkInterceptor {
         resolve(null);
       }, timeoutMs);
 
-      const resolveWrapper = (body: string) => {
+      const resolveWrapper = (pair: CapturedPaginationPair) => {
         clearTimeout(timer);
-        resolve(body);
+        resolve(pair);
       };
 
       this.pendingWaiters.push(resolveWrapper);
     });
   }
 
+  /**
+   * Legacy compatibility method for waiting for raw response body.
+   */
+  public async waitForResponse(timeoutMs: number = 7000): Promise<string | null> {
+    const pair = await this.waitForPagination(timeoutMs);
+    return pair?.responseBody ?? null;
+  }
+
   public hasCapturedBodies(): boolean {
-    return this.capturedBodies.length > 0;
+    return this.capturedPaginationPairs.length > 0;
+  }
+
+  public hasCapturedPagination(): boolean {
+    return this.capturedPaginationPairs.length > 0;
   }
 }
 
 /**
  * Creates the Playwright request handler for scraping public Facebook reshares.
- * Operates strictly with TWO DISTINCT SCROLL PHASES:
- *   PHASE A: POST SCROLL (Login dismissal -> Post container scroll -> Engagement trigger discovery)
- *   PHASE B: RESHARE SCROLL (Reshares dialog open -> Reshares container scroll -> GraphQL capture)
+ * Supports:
+ *   - "AUTO" (Default): Hybrid Direct GraphQL Replay with automatic UI-scroll fallback.
+ *   - "HYBRID": Fast direct cursor replay without UI scrolling.
+ *   - "UI_SCROLL": Traditional browser-driven UI scroll per page.
  */
 export async function createRequestHandler(input: ActorInput) {
   const maxShares = input.maxSharesPerPost ?? 1000;
   const maxScrolls = input.maxScrollAttempts ?? DEFAULT_MAX_SCROLL_ATTEMPTS;
   const scrollDelay = input.scrollDelayMs ?? DEFAULT_SCROLL_DELAY_MS;
   const timezone = input.timezone ?? 'Asia/Ho_Chi_Minh';
+  const paginationMode = input.paginationMode ?? 'AUTO';
 
   return async (context: PlaywrightCrawlingContext) => {
     const { request, page } = context;
     const postUrl = request.url;
-    logger.post(postUrl, 'Opening public Facebook post...');
+    logger.post(postUrl, `Opening public Facebook post (mode: ${paginationMode})...`);
 
     try {
       // ==========================================
@@ -121,7 +187,7 @@ export async function createRequestHandler(input: ActorInput) {
       const { trigger } = await scrollPostToEngagement(postContainer, page);
 
       // ==========================================
-      // PHASE B — RESHARE SCROLL & GRAPHQL CAPTURE
+      // PHASE B — RESHARE MODAL & INITIAL SETUP
       // ==========================================
 
       // 5. Attach GraphQL Network Interceptor before opening reshares modal
@@ -136,87 +202,264 @@ export async function createRequestHandler(input: ActorInput) {
 
       // 8. Initialize tracking state
       const dedupeFilter = new DeduplicationFilter();
-      let paginationState = createInitialPaginationState();
       const collectedRecords: ShareRecord[] = [];
 
-      for (let attempt = 1; attempt <= maxScrolls; attempt++) {
-        logger.scroll(attempt, maxScrolls);
+      const emitRecord = async (record: ShareRecord) => {
+        collectedRecords.push(record);
+        console.log('[SHARE]');
+        console.log(
+          JSON.stringify(
+            {
+              sharerName: record.sharerName,
+              sharedAtUnix: record.sharedAtUnix,
+              sharedAtIso: record.sharedAtIso,
+              sharePostId: record.sharePostId,
+              shareUrl: record.shareUrl,
+            },
+            null,
+            2
+          )
+        );
+        await Actor.pushData(record).catch(() => {});
+      };
 
-        // Check if response was captured on initial modal mount, otherwise scroll reshare container
-        let rawResponse: string | null = null;
-        if (interceptor.hasCapturedBodies()) {
-          rawResponse = await interceptor.waitForResponse(200);
-        } else {
-          await scrollReshares(reshareContainer, 800);
-          await page.keyboard.press('PageDown').catch(() => {});
-          rawResponse = await interceptor.waitForResponse(scrollDelay + 6000);
+      // Allow initial modal render to dispatch CometResharesDialogQuery
+      await page.waitForTimeout(1500);
+
+      // Parse initial modal dialog responses if captured
+      const initialDialogBodies = interceptor.getCapturedDialogBodies();
+      for (const dialogBody of initialDialogBodies) {
+        const chunks = parseGraphqlResponse(dialogBody);
+        for (const chunk of chunks) {
+          const parsed = parseReshares(chunk, postUrl, timezone);
+          const unique = dedupeFilter.filterBatch(parsed.records);
+          for (const record of unique) {
+            await emitRecord(record);
+            if (collectedRecords.length >= maxShares) break;
+          }
+          if (collectedRecords.length >= maxShares) break;
         }
+        if (collectedRecords.length >= maxShares) break;
+      }
 
-        if (!rawResponse) {
-          logger.debug(`[SCROLL] No pagination response received within timeout on scroll #${attempt}`);
-          paginationState = updatePaginationState(paginationState, undefined, 0, maxShares, maxScrolls);
-          if (paginationState.isTerminated) {
-            logger.dialog(`Termination condition reached: ${paginationState.terminationReason}`);
+      if (collectedRecords.length >= maxShares) {
+        logger.done(collectedRecords.length, `Quota reached immediately from initial modal: ${postUrl}`);
+        return;
+      }
+
+      // Reusable UI Scroll loop (used directly in UI_SCROLL mode or as AUTO fallback)
+      const runUiScrollFallback = async (startAttempt: number) => {
+        logger.dialog(`[UI_SCROLL] Executing UI scroll loop (attempts ${startAttempt} to ${maxScrolls})...`);
+        let paginationState = createInitialPaginationState();
+
+        for (let attempt = startAttempt; attempt <= maxScrolls; attempt++) {
+          if (collectedRecords.length >= maxShares) break;
+          logger.scroll(attempt, maxScrolls);
+
+          let rawResponse: string | null = null;
+          if (interceptor.hasCapturedPagination()) {
+            const pair = await interceptor.waitForPagination(200);
+            rawResponse = pair?.responseBody ?? null;
+          } else {
+            await scrollReshares(reshareContainer, 800);
+            await page.keyboard.press('PageDown').catch(() => {});
+            const pair = await interceptor.waitForPagination(scrollDelay + 6000);
+            rawResponse = pair?.responseBody ?? null;
+          }
+
+          if (!rawResponse) {
+            logger.debug(`[SCROLL] No pagination response received within timeout on scroll #${attempt}`);
+            paginationState = updatePaginationState(paginationState, undefined, 0, maxShares, maxScrolls);
+            if (paginationState.isTerminated) {
+              logger.dialog(`Termination condition reached: ${paginationState.terminationReason}`);
+              break;
+            }
+            continue;
+          }
+
+          const payloadChunks = parseGraphqlResponse(rawResponse);
+          for (const chunk of payloadChunks) {
+            const parsed = parseReshares(chunk, postUrl, timezone);
+            if (parsed.records.length === 0) continue;
+
+            const uniqueRecords = dedupeFilter.filterBatch(parsed.records);
+            for (const record of uniqueRecords) {
+              await emitRecord(record);
+              if (collectedRecords.length >= maxShares) break;
+            }
+
+            logger.page({
+              edges: parsed.records.length,
+              newRecords: uniqueRecords.length,
+              duplicates: parsed.records.length - uniqueRecords.length,
+              hasNextPage: Boolean(parsed.pageInfo?.has_next_page),
+            });
+
+            paginationState = updatePaginationState(
+              paginationState,
+              parsed.pageInfo,
+              uniqueRecords.length,
+              maxShares,
+              maxScrolls
+            );
+          }
+
+          if (paginationState.isTerminated || collectedRecords.length >= maxShares) {
             break;
           }
-          continue;
+
+          await page.waitForTimeout(scrollDelay);
+        }
+      };
+
+      // ==========================================
+      // PHASE C — PAGINATION EXECUTION
+      // ==========================================
+
+      if (paginationMode === 'UI_SCROLL') {
+        await runUiScrollFallback(1);
+      } else {
+        // HYBRID or AUTO mode
+        logger.dialog('[HYBRID] Triggering initial UI scroll to capture GraphQL pagination template...');
+        await scrollReshares(reshareContainer, 800);
+        await page.keyboard.press('PageDown').catch(() => {});
+
+        let initialPair = await interceptor.waitForPagination(
+          interceptor.hasCapturedPagination() ? 500 : scrollDelay + 6000
+        );
+
+        if (!initialPair) {
+          // Retry one more scroll in case timing was tight
+          await scrollReshares(reshareContainer, 800);
+          await page.keyboard.press('PageDown').catch(() => {});
+          initialPair = await interceptor.waitForPagination(scrollDelay + 4000);
         }
 
-        // 9. Deserialize raw response
-        const payloadChunks = parseGraphqlResponse(rawResponse);
-        console.log(`[GRAPHQL] Parsed ${payloadChunks.length} response chunk`);
-
-        for (const chunk of payloadChunks) {
-          const parsed = parseReshares(chunk, postUrl, timezone);
-          if (parsed.records.length === 0) continue;
-
-          const uniqueRecords = dedupeFilter.filterBatch(parsed.records);
-
-          for (const record of uniqueRecords) {
-            collectedRecords.push(record);
-
-            // Log formatted share record as requested
-            console.log('[SHARE]');
-            console.log(
-              JSON.stringify(
-                {
-                  sharerName: record.sharerName,
-                  sharedAtUnix: record.sharedAtUnix,
-                  sharedAtIso: record.sharedAtIso,
-                  sharePostId: record.sharePostId,
-                  shareUrl: record.shareUrl,
-                },
-                null,
-                2
-              )
+        if (!initialPair) {
+          if (paginationMode === 'AUTO') {
+            logger.dialog('[HYBRID] Initial pagination query not detected via UI scroll. Falling back to UI_SCROLL mode.');
+            await runUiScrollFallback(1);
+          } else {
+            throw new ScraperError(
+              'GRAPHQL_TEMPLATE_NOT_CAPTURED',
+              'Failed to capture CometResharesFeedPaginationQuery template after UI scroll',
+              'Ensure post has enough reshares to trigger pagination or switch to paginationMode="UI_SCROLL"'
             );
+          }
+        } else {
+          // Parse captured template
+          const template = parseCapturedTemplate(initialPair.postData);
+          const safeMeta = getSafeTemplateMetadata(template);
+          logger.dialog(
+            `[HYBRID] Captured pagination template: ${safeMeta.friendlyName} (doc_id: ${safeMeta.hasDocId}, cursorHash: ${safeMeta.cursorHash})`
+          );
 
-            // Push to Apify Dataset
-            await Actor.pushData(record).catch(() => {});
+          // Parse Page 1 response
+          const initialChunks = parseGraphqlResponse(initialPair.responseBody);
+          let initialPageInfo: { has_next_page?: boolean; end_cursor?: string | null } | undefined;
+
+          for (const chunk of initialChunks) {
+            const parsed = parseReshares(chunk, postUrl, timezone);
+            const unique = dedupeFilter.filterBatch(parsed.records);
+            for (const record of unique) {
+              await emitRecord(record);
+              if (collectedRecords.length >= maxShares) break;
+            }
+            if (parsed.pageInfo) {
+              initialPageInfo = parsed.pageInfo;
+            }
+            if (collectedRecords.length >= maxShares) break;
           }
 
-          logger.page({
-            edges: parsed.records.length,
-            newRecords: uniqueRecords.length,
-            duplicates: parsed.records.length - uniqueRecords.length,
-            hasNextPage: Boolean(parsed.pageInfo?.has_next_page),
-          });
+          // Check if more pages exist
+          let hasNextPage = Boolean(initialPageInfo?.has_next_page);
+          let currentCursor = initialPageInfo?.end_cursor ?? null;
 
-          paginationState = updatePaginationState(
-            paginationState,
-            parsed.pageInfo,
-            uniqueRecords.length,
-            maxShares,
-            maxScrolls
-          );
+          if (hasNextPage && currentCursor && collectedRecords.length < maxShares) {
+            const cursorLoopDetector = new CursorLoopDetector();
+            if (template.variables.cursor && typeof template.variables.cursor === 'string') {
+              cursorLoopDetector.register(template.variables.cursor);
+            }
+            cursorLoopDetector.register(currentCursor);
+
+            let directIteration = 1;
+            let consecutiveStalls = 0;
+
+            while (
+              hasNextPage &&
+              currentCursor &&
+              collectedRecords.length < maxShares &&
+              directIteration < maxScrolls
+            ) {
+              directIteration++;
+              logger.dialog(
+                `[HYBRID] Direct replay page #${directIteration} (cursor: ${hashCursor(currentCursor)})`
+              );
+
+              let replayedRawResponse: string;
+              try {
+                replayedRawResponse = await replayPaginationRequest(page, template, currentCursor);
+              } catch (replayErr) {
+                if (paginationMode === 'AUTO') {
+                  logger.dialog(
+                    `[HYBRID] Direct replay failed: ${(replayErr as Error).message}. Falling back to UI_SCROLL mode.`
+                  );
+                  await runUiScrollFallback(directIteration);
+                  break;
+                } else {
+                  throw replayErr;
+                }
+              }
+
+              const chunks = parseGraphqlResponse(replayedRawResponse);
+              const replayedRecords: ShareRecord[] = [];
+              let loopPageInfo: { has_next_page?: boolean; end_cursor?: string | null } | undefined;
+
+              for (const chunk of chunks) {
+                const parsed = parseReshares(chunk, postUrl, timezone);
+                replayedRecords.push(...parsed.records);
+                if (parsed.pageInfo) {
+                  loopPageInfo = parsed.pageInfo;
+                }
+              }
+
+              const uniqueRecords = dedupeFilter.filterBatch(replayedRecords);
+              for (const record of uniqueRecords) {
+                await emitRecord(record);
+                if (collectedRecords.length >= maxShares) break;
+              }
+
+              logger.page({
+                edges: replayedRecords.length,
+                newRecords: uniqueRecords.length,
+                duplicates: replayedRecords.length - uniqueRecords.length,
+                hasNextPage: Boolean(loopPageInfo?.has_next_page),
+              });
+
+              if (uniqueRecords.length === 0) {
+                consecutiveStalls++;
+                if (consecutiveStalls >= 3) {
+                  logger.dialog('[HYBRID] Stalled: 3 consecutive direct replay requests returned 0 new records.');
+                  break;
+                }
+              } else {
+                consecutiveStalls = 0;
+              }
+
+              hasNextPage = Boolean(loopPageInfo?.has_next_page);
+              currentCursor = loopPageInfo?.end_cursor ?? null;
+
+              if (hasNextPage && currentCursor) {
+                try {
+                  cursorLoopDetector.register(currentCursor);
+                } catch (loopErr) {
+                  logger.dialog(`[HYBRID] Pagination loop detected: ${(loopErr as Error).message}`);
+                  break;
+                }
+              }
+            }
+          }
         }
-
-        if (paginationState.isTerminated) {
-          logger.dialog(`Termination condition met: ${paginationState.terminationReason}`);
-          break;
-        }
-
-        await page.waitForTimeout(scrollDelay);
       }
 
       logger.done(collectedRecords.length, `Completed scraping for post: ${postUrl}`);

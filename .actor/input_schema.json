@@ -58,6 +58,15 @@
       "type": "boolean",
       "description": "Run Chromium in headless mode. Set to false for local visual debugging.",
       "default": true
+    },
+    "paginationMode": {
+      "title": "Pagination Mode",
+      "type": "string",
+      "description": "Strategy for paginating reshares: AUTO (hybrid with fallback), HYBRID (direct cursor replay), or UI_SCROLL (browser scroll).",
+      "editor": "select",
+      "default": "AUTO",
+      "enum": ["AUTO", "HYBRID", "UI_SCROLL"],
+      "enumTitles": ["AUTO (Hybrid Replay with UI Scroll Fallback)", "HYBRID (Fast Direct Cursor Replay)", "UI_SCROLL (Browser Scroll Per Page)"]
     }
   },
   "required": ["postUrls"]

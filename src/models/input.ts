@@ -47,5 +47,14 @@ export interface ActorInput {
    * Default: true
    */
   headless?: boolean;
+
+  /**
+   * Pagination execution mode:
+   * - "AUTO": Tries hybrid direct replay first, falls back to UI scroll if needed (recommended).
+   * - "HYBRID": Fast direct cursor replay via browser context without UI scrolling.
+   * - "UI_SCROLL": Traditional browser-driven scroll per page.
+   * Default: "AUTO"
+   */
+  paginationMode?: 'AUTO' | 'HYBRID' | 'UI_SCROLL';
 }
 
