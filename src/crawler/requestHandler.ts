@@ -3,6 +3,7 @@ import type { Page } from 'playwright';
 import { Actor } from 'apify';
 import { ActorInput } from '../models/input.js';
 import { ShareRecord } from '../models/shareRecord.js';
+import { ScraperError } from '../models/errors.js';
 import { openPost } from '../facebook/openPost.js';
 import { dismissLoginModal } from '../facebook/dismissLoginModal.js';
 import { findPostScrollContainer } from '../facebook/findPostScrollContainer.js';
@@ -102,120 +103,128 @@ export async function createRequestHandler(input: ActorInput) {
     const postUrl = request.url;
     logger.post(postUrl, 'Opening public Facebook post...');
 
-    // ==========================================
-    // PHASE A — POST SCROLL & TRIGGER DISCOVERY
-    // ==========================================
+    try {
+      // ==========================================
+      // PHASE A — POST SCROLL & TRIGGER DISCOVERY
+      // ==========================================
 
-    // 1. Navigate to public post
-    await openPost(page, postUrl);
+      // 1. Navigate to public post
+      await openPost(page, postUrl);
 
-    // 2. Dismiss unauthenticated Login Modal (Auth Gate) if present
-    await dismissLoginModal(page);
+      // 2. Dismiss unauthenticated Login Modal (Auth Gate) if present
+      await dismissLoginModal(page);
 
-    // 3. Identify Post Detail Container
-    const { container: postContainer } = await findPostScrollContainer(page);
+      // 3. Identify Post Detail Container
+      const { container: postContainer } = await findPostScrollContainer(page);
 
-    // 4. Scroll Post Container downward to reveal Engagement Section and locate Reshare Trigger
-    const { trigger } = await scrollPostToEngagement(postContainer, page);
+      // 4. Scroll Post Container downward to reveal Engagement Section and locate Reshare Trigger
+      const { trigger } = await scrollPostToEngagement(postContainer, page);
 
-    // ==========================================
-    // PHASE B — RESHARE SCROLL & GRAPHQL CAPTURE
-    // ==========================================
+      // ==========================================
+      // PHASE B — RESHARE SCROLL & GRAPHQL CAPTURE
+      // ==========================================
 
-    // 5. Attach GraphQL Network Interceptor before opening reshares modal
-    const interceptor = new ReshareNetworkInterceptor();
-    interceptor.attach(page);
+      // 5. Attach GraphQL Network Interceptor before opening reshares modal
+      const interceptor = new ReshareNetworkInterceptor();
+      interceptor.attach(page);
 
-    // 6. Click reshare trigger to open "People who shared this" dialog
-    const reshareDialog = await openResharesDialog(page, trigger);
+      // 6. Click reshare trigger to open "People who shared this" dialog
+      const reshareDialog = await openResharesDialog(page, trigger);
 
-    // 7. Locate the inner scrollable container for the reshares feed
-    const { container: reshareContainer } = await findReshareScrollContainer(reshareDialog);
+      // 7. Locate the inner scrollable container for the reshares feed
+      const { container: reshareContainer } = await findReshareScrollContainer(reshareDialog);
 
-    // 8. Initialize tracking state
-    const dedupeFilter = new DeduplicationFilter();
-    let paginationState = createInitialPaginationState();
-    const collectedRecords: ShareRecord[] = [];
+      // 8. Initialize tracking state
+      const dedupeFilter = new DeduplicationFilter();
+      let paginationState = createInitialPaginationState();
+      const collectedRecords: ShareRecord[] = [];
 
-    for (let attempt = 1; attempt <= maxScrolls; attempt++) {
-      logger.scroll(attempt, maxScrolls);
+      for (let attempt = 1; attempt <= maxScrolls; attempt++) {
+        logger.scroll(attempt, maxScrolls);
 
-      // Check if response was captured on initial modal mount, otherwise scroll reshare container
-      let rawResponse: string | null = null;
-      if (interceptor.hasCapturedBodies()) {
-        rawResponse = await interceptor.waitForResponse(200);
-      } else {
-        await scrollReshares(reshareContainer, 800);
-        rawResponse = await interceptor.waitForResponse(scrollDelay + 6000);
-      }
+        // Check if response was captured on initial modal mount, otherwise scroll reshare container
+        let rawResponse: string | null = null;
+        if (interceptor.hasCapturedBodies()) {
+          rawResponse = await interceptor.waitForResponse(200);
+        } else {
+          await scrollReshares(reshareContainer, 800);
+          rawResponse = await interceptor.waitForResponse(scrollDelay + 6000);
+        }
 
-      if (!rawResponse) {
-        logger.debug(`[SCROLL] No pagination response received within timeout on scroll #${attempt}`);
-        paginationState = updatePaginationState(paginationState, undefined, 0, maxShares, maxScrolls);
+        if (!rawResponse) {
+          logger.debug(`[SCROLL] No pagination response received within timeout on scroll #${attempt}`);
+          paginationState = updatePaginationState(paginationState, undefined, 0, maxShares, maxScrolls);
+          if (paginationState.isTerminated) {
+            logger.dialog(`Termination condition reached: ${paginationState.terminationReason}`);
+            break;
+          }
+          continue;
+        }
+
+        // 9. Deserialize raw response
+        const payloadChunks = parseGraphqlResponse(rawResponse);
+        console.log(`[GRAPHQL] Parsed ${payloadChunks.length} response chunk`);
+
+        for (const chunk of payloadChunks) {
+          const parsed = parseReshares(chunk, postUrl, timezone);
+          if (parsed.records.length === 0) continue;
+
+          const uniqueRecords = dedupeFilter.filterBatch(parsed.records);
+
+          for (const record of uniqueRecords) {
+            collectedRecords.push(record);
+
+            // Log formatted share record as requested
+            console.log('[SHARE]');
+            console.log(
+              JSON.stringify(
+                {
+                  sharerName: record.sharerName,
+                  sharedAtUnix: record.sharedAtUnix,
+                  sharedAtIso: record.sharedAtIso,
+                  sharePostId: record.sharePostId,
+                  shareUrl: record.shareUrl,
+                },
+                null,
+                2
+              )
+            );
+
+            // Push to Apify Dataset
+            await Actor.pushData(record).catch(() => {});
+          }
+
+          logger.page({
+            edges: parsed.records.length,
+            newRecords: uniqueRecords.length,
+            duplicates: parsed.records.length - uniqueRecords.length,
+            hasNextPage: Boolean(parsed.pageInfo?.has_next_page),
+          });
+
+          paginationState = updatePaginationState(
+            paginationState,
+            parsed.pageInfo,
+            uniqueRecords.length,
+            maxShares,
+            maxScrolls
+          );
+        }
+
         if (paginationState.isTerminated) {
-          logger.dialog(`Termination condition reached: ${paginationState.terminationReason}`);
+          logger.dialog(`Termination condition met: ${paginationState.terminationReason}`);
           break;
         }
-        continue;
+
+        await page.waitForTimeout(scrollDelay);
       }
 
-      // 9. Deserialize raw response
-      const payloadChunks = parseGraphqlResponse(rawResponse);
-      console.log(`[GRAPHQL] Parsed ${payloadChunks.length} response chunk`);
-
-      for (const chunk of payloadChunks) {
-        const parsed = parseReshares(chunk, postUrl, timezone);
-        if (parsed.records.length === 0) continue;
-
-        const uniqueRecords = dedupeFilter.filterBatch(parsed.records);
-
-        for (const record of uniqueRecords) {
-          collectedRecords.push(record);
-
-          // Log formatted share record as requested
-          console.log('[SHARE]');
-          console.log(
-            JSON.stringify(
-              {
-                sharerName: record.sharerName,
-                sharedAtUnix: record.sharedAtUnix,
-                sharedAtIso: record.sharedAtIso,
-                sharePostId: record.sharePostId,
-                shareUrl: record.shareUrl,
-              },
-              null,
-              2
-            )
-          );
-
-          // Push to Apify Dataset
-          await Actor.pushData(record).catch(() => {});
-        }
-
-        logger.page({
-          edges: parsed.records.length,
-          newRecords: uniqueRecords.length,
-          duplicates: parsed.records.length - uniqueRecords.length,
-          hasNextPage: Boolean(parsed.pageInfo?.has_next_page),
-        });
-
-        paginationState = updatePaginationState(
-          paginationState,
-          parsed.pageInfo,
-          uniqueRecords.length,
-          maxShares,
-          maxScrolls
-        );
+      logger.done(collectedRecords.length, `Completed scraping for post: ${postUrl}`);
+    } catch (err) {
+      if (err instanceof ScraperError) {
+        logger.error(`[${err.code}] ${err.message}`);
+      } else {
+        logger.error(err, `Error occurred while crawling post: ${postUrl}`);
       }
-
-      if (paginationState.isTerminated) {
-        logger.dialog(`Termination condition met: ${paginationState.terminationReason}`);
-        break;
-      }
-
-      await page.waitForTimeout(scrollDelay);
     }
-
-    logger.done(collectedRecords.length, `Completed scraping for post: ${postUrl}`);
   };
 }

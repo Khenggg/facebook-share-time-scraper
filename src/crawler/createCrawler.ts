@@ -1,4 +1,5 @@
 import { PlaywrightCrawler } from 'crawlee';
+import { Actor } from 'apify';
 import { ActorInput } from '../models/input.js';
 import { createRequestHandler } from './requestHandler.js';
 
@@ -9,12 +10,19 @@ import { createRequestHandler } from './requestHandler.js';
 export async function createCrawler(input: ActorInput, isHeadless: boolean = true): Promise<PlaywrightCrawler> {
   const requestHandler = await createRequestHandler(input);
 
+  // Initialize optional Apify Proxy
+  const proxyConfiguration = input.proxyConfiguration
+    ? await Actor.createProxyConfiguration(input.proxyConfiguration)
+    : undefined;
+
   return new PlaywrightCrawler({
     requestHandler,
     headless: isHeadless,
+    proxyConfiguration,
     maxRequestsPerCrawl: input.postUrls.length,
     navigationTimeoutSecs: 45,
-    requestHandlerTimeoutSecs: 300,
+    requestHandlerTimeoutSecs: 600,
+    maxRequestRetries: 1,
     launchContext: {
       launchOptions: {
         headless: isHeadless,
@@ -28,7 +36,7 @@ export async function createCrawler(input: ActorInput, isHeadless: boolean = tru
       },
     },
     browserPoolOptions: {
-      useFingerprints: false, // Avoid randomizing into unexpected authenticated configurations
+      useFingerprints: false, // Maintain deterministic unauthenticated baseline
     },
   });
 }

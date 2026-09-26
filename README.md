@@ -72,7 +72,11 @@ The Actor accepts the following parameters via `.actor/input_schema.json`:
   "maxScrollAttempts": 1000,
   "scrollDelayMs": 1000,
   "timezone": "Asia/Ho_Chi_Minh",
-  "debug": false
+  "debug": false,
+  "headless": true,
+  "proxyConfiguration": {
+    "useApifyProxy": true
+  }
 }
 ```
 
@@ -86,6 +90,8 @@ The Actor accepts the following parameters via `.actor/input_schema.json`:
 | `scrollDelayMs` | `number` | `1000` | Throttle time between scroll actions for Facebook lazy loading. |
 | `timezone` | `string` | `"Asia/Ho_Chi_Minh"` | IANA timezone used for `sharedAtLocal`. |
 | `debug` | `boolean` | `false` | Enable verbose diagnostic logging. |
+| `headless` | `boolean` | `true` | Run Chromium headless. Set to `false` for visual debugging. |
+| `proxyConfiguration` | `object` | `undefined` | Optional Apify Proxy configuration to prevent IP rate-limiting. |
 
 ---
 
@@ -141,6 +147,20 @@ npm run lint
 ### Building Actor
 ```bash
 npm run build
+```
+
+### Running Locally (Apify Actor Simulation)
+```bash
+npm start
+```
+
+### Live Smoke Testing
+```bash
+# Headless smoke test against live public post
+npm run smoke:live
+
+# Headed GUI demonstration with slowMo & screenshots
+npm run smoke:gui
 ```
 
 ---

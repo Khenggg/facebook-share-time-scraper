@@ -36,4 +36,16 @@ export interface ActorInput {
    * Default: false
    */
   debug?: boolean;
+
+  /**
+   * Optional Apify proxy configuration.
+   */
+  proxyConfiguration?: Record<string, unknown>;
+
+  /**
+   * Run browser in headless mode.
+   * Default: true
+   */
+  headless?: boolean;
 }
+

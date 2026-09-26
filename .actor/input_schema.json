@@ -46,6 +46,18 @@
       "type": "boolean",
       "description": "Enable verbose logging and save sanitized diagnostic network events.",
       "default": false
+    },
+    "proxyConfiguration": {
+      "title": "Proxy Configuration",
+      "type": "object",
+      "description": "Optional Apify Proxy configuration to prevent IP rate-limiting on large multi-post runs.",
+      "editor": "proxy"
+    },
+    "headless": {
+      "title": "Headless Mode",
+      "type": "boolean",
+      "description": "Run Chromium in headless mode. Set to false for local visual debugging.",
+      "default": true
     }
   },
   "required": ["postUrls"]

@@ -52,10 +52,14 @@ flowchart TD
 
 ### 2. Facebook UI Interaction Engine (`src/facebook/`)
 - **`selectors.ts`**: Centralized repository of semantic and role-based locators.
-- **`openPost.ts`**: Navigates to the Facebook post URL and handles initial unauthenticated overlay dismissals (e.g. cookie consent banners, "See more on Facebook" modals).
-- **`openResharesDialog.ts`**: Locates and clicks the public reshare counter link.
-- **`findScrollableDialog.ts`**: Identifies the specific scroll container DOM node hosting the reshares feed.
-- **`scrollReshares.ts`**: Dispatches scroll events into the container with configurable throttle intervals to trigger lazy loading.
+- **`openPost.ts`**: Navigates to the Facebook post URL in a clean logged-out context.
+- **`dismissLoginModal.ts`**: Detects and dismisses the unauthenticated login modal ("See more on Facebook").
+- **`findPostScrollContainer.ts`**: Identifies the post detail dialog or scrollable post feed container.
+- **`scrollPostToEngagement.ts`**: Scrolls the post downward until the engagement section is visible.
+- **`findReshareTrigger.ts`**: Locates the specific share-count trigger (`X shares` / `X lượt chia sẻ`), avoiding the composer action button.
+- **`openResharesDialog.ts`**: Clicks the reshare trigger and waits for the "People who shared this" dialog (`role="dialog"`).
+- **`findReshareScrollContainer.ts`**: Locates the inner scrollable container for the reshares feed.
+- **`scrollReshares.ts`**: Scrolls the inner reshares container using dynamic element evaluation across React re-renders.
 
 ### 3. Network Interceptor & Classifier (`src/graphql/identifyOperation.ts`)
 - Hooks into Playwright's `page.on('response', ...)`.

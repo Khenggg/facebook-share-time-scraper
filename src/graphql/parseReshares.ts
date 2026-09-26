@@ -1,6 +1,6 @@
 import { ShareRecord } from '../models/shareRecord.js';
 import { formatUnixToIso, formatUnixToLocal } from '../utils/timestamp.js';
-import { CometResharesResponse, RawPageInfo, RawReshareEdge } from './types.js';
+import { CometResharesResponse, RawActor, RawPageInfo, RawReshareEdge } from './types.js';
 
 export interface ParseResharesResult {
   records: ShareRecord[];
@@ -94,18 +94,30 @@ function extractSingleShareRecord(
   }
 
   // 2. ACTOR EXTRACTION (with resilient fallbacks)
-  const actor = node.comet_sections?.context_layout?.story?.actors?.[0];
+  const anyNode = node as Record<string, unknown>;
+  const storyObj = (anyNode.story as Record<string, unknown> | undefined);
+  const actor =
+    node.comet_sections?.context_layout?.story?.actors?.[0] ||
+    (Array.isArray(anyNode.actors) ? (anyNode.actors[0] as RawActor) : undefined) ||
+    (Array.isArray(storyObj?.actors) ? (storyObj?.actors[0] as RawActor) : undefined);
+
   const sharerId = actor?.id ?? null;
   const sharerName = actor?.name ?? null;
-  const sharerProfileUrl = actor?.profile_url ?? null;
+  let sharerProfileUrl = actor?.profile_url ?? null;
+  if (!sharerProfileUrl && sharerId) {
+    sharerProfileUrl = `https://www.facebook.com/${sharerId}`;
+  }
 
   // 3. STORY IDENTIFIERS & PERMALINK
-  const shareStoryId = node.id ?? null;
-  const sharePostId = node.post_id ?? null;
-  const shareUrl = node.permalink_url ?? null;
+  const shareStoryId = node.id ?? (storyObj?.id as string | undefined) ?? null;
+  const sharePostId = node.post_id ?? (storyObj?.post_id as string | undefined) ?? null;
+  const shareUrl = node.permalink_url ?? (anyNode.url as string | undefined) ?? (anyNode.share_url as string | undefined) ?? null;
 
   // 4. PRIVACY SCOPE
-  const visibility = node.privacy_scope?.description ?? null;
+  const visibility =
+    node.privacy_scope?.description ??
+    ((storyObj?.privacy_scope as Record<string, unknown> | undefined)?.description as string | undefined) ??
+    null;
 
   return {
     originalPostUrl,

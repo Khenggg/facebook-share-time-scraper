@@ -78,4 +78,42 @@ describe('parseReshares Contract Tests', () => {
     expect(parseReshares({ data: {} }, originalPostUrl).records).toEqual([]);
     expect(parseReshares({ data: { node: { reshares: { edges: 'not-an-array' } } } }, originalPostUrl).records).toEqual([]);
   });
+
+  it('correctly uses fallbacks for actors, URLs, and IDs when standard paths are absent', () => {
+    const fallbackPayload = {
+      data: {
+        node: {
+          id: 'feedback_fb',
+          reshares: {
+            edges: [
+              {
+                node: {
+                  post_id: 'post_fallback_123',
+                  creation_time: 1789000000,
+                  actors: [
+                    {
+                      id: 'user_fallback_456',
+                      name: 'Fallback User',
+                    },
+                  ],
+                  url: 'https://facebook.com/custom_url',
+                  privacy_scope: { description: 'Public' },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    const result = parseReshares(fallbackPayload, originalPostUrl);
+    expect(result.records).toHaveLength(1);
+    const rec = result.records[0];
+    expect(rec.sharedAtUnix).toBe(1789000000);
+    expect(rec.sharerId).toBe('user_fallback_456');
+    expect(rec.sharerName).toBe('Fallback User');
+    expect(rec.sharerProfileUrl).toBe('https://www.facebook.com/user_fallback_456');
+    expect(rec.shareUrl).toBe('https://facebook.com/custom_url');
+    expect(rec.visibility).toBe('Public');
+  });
 });
