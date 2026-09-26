@@ -105,3 +105,15 @@ This project operates entirely in **LOGGED-OUT mode** (`__user = 0`), opens the 
 - **Template Lifespan**: Request templates (with dynamic `lsd`, `doc_id`, `__spin_*`) are only guaranteed valid for the current browser session.
 - **Count Override Clamping**: Facebook's unauthenticated backend clamps or ignores attempts to arbitrarily increase `variables.count` beyond standard page sizes.
 - **Rate-Limiting**: High-concurrency direct fetches without delay may trigger unauthenticated rate limits faster than natural human-paced scrolling.
+
+---
+
+## 6. Phase 2 Anonymous vs Cookie-Authenticated Comparison
+
+### 6.1 Purpose
+Quantify the concrete differences between scraping a public post via an unauthenticated session (`__user=0`) versus a cookie-authenticated session using valid test credentials.
+
+### 6.2 Key Semantics
+- **Anonymous Session**: Represents public, logged-out web indexability.
+- **Authenticated Session**: Represents **account-visible** reshares for that specific user identity, not the entire global private reshare universe.
+- **Comparison Engine**: Uses deterministic canonical share identity (`shareStoryId` -> `sharePostId` -> `shareUrl` -> compound fallback) to measure overlap, anonymous-only records, authenticated-only records, unique sharers, and Jaccard similarity index.

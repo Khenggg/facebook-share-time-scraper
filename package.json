@@ -12,7 +12,8 @@
     "lint": "tsc --noEmit",
     "smoke:live": "tsx scripts/smokeLive.ts",
     "smoke:gui": "tsx scripts/smokeLive.ts --headed",
-    "experiment:hybrid": "tsx scripts/experimentHybrid.ts"
+    "experiment:hybrid": "tsx scripts/experimentHybrid.ts",
+    "experiment:auth-compare": "tsx scripts/experimentAuthCompare.ts"
   },
   "keywords": [
     "apify",

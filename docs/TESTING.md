@@ -94,3 +94,24 @@ npm run experiment:hybrid -- <facebook-post-url>
 4. Replayed response returns HTTP 200 and genuinely new `ShareRecord` items.
 5. Multi-page loop advances through subsequent cursors until `has_next_page === false`.
 6. Zero sensitive tokens, passwords, or cookies are logged or persisted.
+
+---
+
+## 6. Phase 2 Anonymous vs Authenticated Comparison Testing
+
+Run the comparison experiment runner:
+```bash
+npm run experiment:auth-compare -- \
+  --url "<facebook-post-url>" \
+  --cookies "./secrets/facebook-cookies.json" \
+  --maxShares 1000 \
+  --maxTime 120
+```
+
+**Assertions Verified**:
+1. Cookie validation safely checks array of objects (`name`, `value`, `domain`) without logging values.
+2. Session verification checks `c_user` + `xs`, masks account ID (e.g. `****1234`), and rejects invalid cookies.
+3. Both modes run in strictly isolated browser contexts without cross-contamination.
+4. Sets are mathematically compared for overlap, union, anonymous-only, authenticated-only, and Jaccard similarity.
+5. Outputs sanitized `artifacts/comparison-report.json` and `artifacts/comparison-diff.csv`.
+

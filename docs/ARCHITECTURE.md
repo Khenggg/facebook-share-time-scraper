@@ -83,3 +83,9 @@ flowchart TD
 - **`captureRequestTemplate.ts`**: Captures real unauthenticated `CometResharesFeedPaginationQuery` POST form data emitted by the browser, preserving signed tokens in memory without hardcoding or logging. Provides `cloneRequestWithCursor` to immutably replace `variables.cursor` with next cursors.
 - **`replayPaginationRequest.ts`**: Dispatches subsequent pagination requests directly via `page.evaluate(window.fetch)` inside the active browser context. Achieves sub-second page retrieval with zero DOM scrolling, immune to DOM re-renders or virtual scroll staleness. Includes `CursorLoopDetector` to prevent pagination loops.
 
+### 7. Session Isolation & Comparison Engine (`src/facebook/session/`, `src/comparison/`)
+- **`cookieValidator.ts`**: Validates Playwright cookie arrays safely, enforcing domains and names while never logging sensitive token values.
+- **`createAnonymousContext.ts` / `createAuthenticatedContext.ts`**: Builds completely isolated browser contexts without cross-contamination.
+- **`verifyFacebookSession.ts`**: Validates active session state, masks user ID (e.g. `****1234`), and throws `AUTH_SESSION_INVALID` upon expired cookies.
+- **`compareShareSets.ts`**: Computes mathematical overlap, union, anonymous-only, authenticated-only records, and Jaccard similarity between two execution passes.
+

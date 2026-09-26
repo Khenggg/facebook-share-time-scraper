@@ -162,3 +162,15 @@ Both operations share the exact canonical `edge.node.creation_time` timestamp pa
 ### 4.4 Batching & Stream Framing
 - Facebook responses arrive framed as single JSON, `for (;;);{"data":...}`, or newline-delimited multipart stream chunks.
 - The parser strips anti-hijack prefixes and parses all valid JSON objects while ignoring malformed lines.
+
+---
+
+## 6. Authenticated vs Anonymous Surface Observations (Phase 2)
+
+| Dimension | Anonymous (`__user=0`) | Authenticated (`c_user + xs`) |
+|---|---|---|
+| **Login Gate** | Pop-up modal ("See more on Facebook") requiring dismissal. | No login modal; full navigation bar. |
+| **Share Count Trigger** | Located below post fold; must scroll post to locate. | Located in engagement bar above action buttons. |
+| **GraphQL Operations** | `CometResharesDialogQuery` + `CometResharesFeedPaginationQuery` | Identical operation names observed. |
+| **Pagination Cap** | Server signals `has_next_page: false` upon exhausting public index. | Signals `has_next_page: false` upon exhausting account-visible feed. |
+| **Data Scope** | Publicly accessible reshares. | Account-visible reshares (friends, pages, public). |

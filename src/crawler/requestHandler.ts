@@ -50,6 +50,7 @@ export class ReshareNetworkInterceptor {
   private readonly pendingWaiters: Array<(pair: CapturedPaginationPair) => void> = [];
   private readonly capturedPaginationPairs: CapturedPaginationPair[] = [];
   private readonly capturedDialogBodies: string[] = [];
+  private readonly observedOperationNames = new Set<string>();
   private readonly requestPostDataMap = new Map<PlaywrightRequest, string>();
 
   public attach(page: Page): void {
@@ -71,6 +72,10 @@ export class ReshareNetworkInterceptor {
 
       const postData = this.requestPostDataMap.get(request) || request.postData() || '';
       const opInfo = identifyGraphqlOperation(postData);
+
+      if (opInfo.friendlyName) {
+        this.observedOperationNames.add(opInfo.friendlyName);
+      }
 
       // 1. Capture initial modal dialog query
       if (opInfo.friendlyName === COMET_RESHARES_DIALOG_QUERY_NAME) {
@@ -105,6 +110,10 @@ export class ReshareNetworkInterceptor {
 
   public getCapturedDialogBodies(): string[] {
     return [...this.capturedDialogBodies];
+  }
+
+  public getObservedOperationNames(): string[] {
+    return Array.from(this.observedOperationNames);
   }
 
   /**

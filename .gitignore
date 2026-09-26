@@ -7,3 +7,11 @@ storage/
 .DS_Store
 Thumbs.db
 screenshots/
+artifacts/
+
+# Security & Secrets (Sensitive credentials strictly ignored)
+cookies*.json
+facebook-cookies*.json
+storageState*.json
+.auth/
+secrets/

@@ -198,3 +198,27 @@ In Phase 1.5, a faster, more resilient pagination architecture was experimentall
 2. **Resilience to React Re-rendering**: Replay operates via network fetch in the page context, completely immune to DOM nodes detaching or re-mounting.
 3. **Canonical Timestamp Invariant Preserved**: Extracts canonical `edge.node.creation_time` directly from the raw GraphQL stream.
 
+---
+
+## 4. Anonymous vs Authenticated Comparison Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CLI as scripts/experimentAuthCompare.ts
+    participant Anon as Anonymous Browser Context
+    participant Auth as Authenticated Browser Context
+    participant Comp as Comparison Engine (compareShareSets)
+
+    CLI->>Anon: Execute scrape (clean __user=0)
+    Anon-->>CLI: Return AnonResult (records, pages, stopReason)
+
+    CLI->>Auth: Inject cookies & verify session
+    CLI->>Auth: Execute scrape (account-visible session)
+    Auth-->>CLI: Return AuthResult (records, pages, stopReason)
+
+    CLI->>Comp: compareShareSets(anonRecords, authRecords)
+    Comp-->>CLI: Output overlap, anon-only, auth-only, Jaccard index
+    CLI->>CLI: Write artifacts/comparison-report.json & comparison-diff.csv
+```
+
