@@ -18,14 +18,16 @@
       "description": "Maximum number of public reshares to scrape for each post.",
       "default": 1000,
       "minimum": 1,
-      "maximum": 50000
+      "maximum": 50000,
+      "editor": "number"
     },
     "maxScrollAttempts": {
       "title": "Max Scroll Attempts",
       "type": "integer",
       "description": "Safety threshold on the number of scroll actions inside the reshare dialog to prevent infinite loops.",
       "default": 1000,
-      "minimum": 1
+      "minimum": 1,
+      "editor": "number"
     },
     "scrollDelayMs": {
       "title": "Scroll Delay (ms)",
@@ -33,13 +35,15 @@
       "description": "Delay in milliseconds between scroll actions to allow lazy GraphQL loading.",
       "default": 1000,
       "minimum": 300,
-      "maximum": 10000
+      "maximum": 10000,
+      "editor": "number"
     },
     "timezone": {
       "title": "Output Timezone",
       "type": "string",
       "description": "IANA Timezone identifier used to generate human-readable sharedAtLocal values (e.g. Asia/Ho_Chi_Minh).",
-      "default": "Asia/Ho_Chi_Minh"
+      "default": "Asia/Ho_Chi_Minh",
+      "editor": "textfield"
     },
     "debug": {
       "title": "Debug Mode",
@@ -72,7 +76,8 @@
       "title": "Max Run Time Per Post (seconds)",
       "type": "integer",
       "description": "Optional time limit in seconds per post for scraping reshares.",
-      "minimum": 10
+      "minimum": 10,
+      "editor": "number"
     }
   },
   "required": ["postUrls"]

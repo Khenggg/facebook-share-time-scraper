@@ -3,7 +3,7 @@
   "name": "facebook-public-reshare-time-scraper",
   "title": "Facebook Public Reshare Time Scraper",
   "description": "Extract exact share timestamps (Unix & ISO) and public sharer profiles from Facebook public posts without login.",
-  "version": "1.0.0",
+  "version": "1.0",
   "meta": {
     "templateId": "ts-playwright-camoufox"
   },

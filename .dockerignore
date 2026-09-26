@@ -1,0 +1,16 @@
+node_modules/
+dist/
+storage/
+.actor/build/
+.apify/
+*.log
+.env
+.DS_Store
+Thumbs.db
+screenshots/
+artifacts/
+secrets/
+cookies*.json
+facebook-cookies*.json
+storageState*.json
+.git/
