@@ -41,6 +41,7 @@ export interface RunSinglePostScrapeOptions {
   timezone?: string;
   maxRunTimeSeconds?: number;
   paginationMode?: 'AUTO' | 'HYBRID' | 'UI_SCROLL';
+  capturedTemplate?: any;
 }
 
 /**
@@ -80,6 +81,7 @@ export async function runSinglePostScrape(
   const collectedRecords: ShareRecord[] = [];
   const dedupeFilter = new DeduplicationFilter();
   const interceptor = new ReshareNetworkInterceptor();
+  let currentTemplate: any = options?.capturedTemplate ?? null;
 
   const isTimeLimitReached = (): boolean => {
     if (maxRunTimeSeconds && (Date.now() - startTimeMs) >= maxRunTimeSeconds * 1000) {
@@ -108,9 +110,116 @@ export async function runSinglePostScrape(
       await dismissLoginModal(page);
     }
 
-    // 4. Locate Post Scroll Container and Engagement Trigger
-    const { container: postContainer } = await findPostScrollContainer(page);
-    const { trigger } = await scrollPostToEngagement(postContainer, page);
+    if (mode === 'authenticated' && currentTemplate) {
+      logger.dialog(`${modePrefix} Replaying with captured template under authenticated session...`);
+      // Extract c_user and dtsg from page
+      const authEnv = await page.evaluate(() => {
+        const cUserMatch = document.cookie.match(/c_user=(\d+)/);
+        const cUserId = cUserMatch ? cUserMatch[1] : null;
+        let dtsg: string | null = null;
+        try {
+          const scripts = Array.from(document.querySelectorAll('script'));
+          for (const s of scripts) {
+            const text = s.textContent || '';
+            const match = text.match(/"DTSGInitialData"[^}]*"token":"([^"]+)"/);
+            if (match) {
+              dtsg = match[1];
+              break;
+            }
+          }
+        } catch {}
+        return { cUserId, dtsg };
+      });
+
+      const authUserId = authEnv.cUserId || (sessionState.userId ? sessionState.userId.replace(/\*/g, '') : null);
+      const params = new URLSearchParams(currentTemplate.body);
+      if (authUserId) {
+        params.set('__user', authUserId);
+        params.set('av', authUserId);
+      }
+      if (authEnv.dtsg) {
+        params.set('fb_dtsg', authEnv.dtsg);
+      }
+      const authTemplate = {
+        ...currentTemplate,
+        body: params.toString(),
+      };
+
+      let currentCursor = (authTemplate.variables?.cursor as string) || '';
+      let hasNextPage = true;
+      const cursorLoopDetector = new CursorLoopDetector();
+      if (currentCursor) cursorLoopDetector.register(currentCursor);
+
+      let directIteration = 0;
+      let consecutiveStalls = 0;
+
+      while (
+        hasNextPage &&
+        collectedRecords.length < maxShares &&
+        directIteration < maxScrolls &&
+        !isTimeLimitReached()
+      ) {
+        directIteration++;
+        pagesFetched++;
+
+        let replayedRawResponse: string;
+        try {
+          replayedRawResponse = await replayPaginationRequest(page, authTemplate, currentCursor);
+        } catch (replayErr) {
+          stopReason = 'GRAPHQL_REPLAY_FAILED';
+          break;
+        }
+
+        const chunks = parseGraphqlResponse(replayedRawResponse);
+        const replayedRecords: ShareRecord[] = [];
+        let loopPageInfo: { has_next_page?: boolean; end_cursor?: string | null } | undefined;
+
+        for (const chunk of chunks) {
+          const parsed = parseReshares(chunk, postUrl, timezone);
+          replayedRecords.push(...parsed.records);
+          if (parsed.pageInfo) loopPageInfo = parsed.pageInfo;
+        }
+
+        const uniqueRecords = dedupeFilter.filterBatch(replayedRecords);
+        for (const r of uniqueRecords) {
+          collectedRecords.push(r);
+          if (collectedRecords.length >= maxShares) {
+            stopReason = 'MAX_SHARES_REACHED';
+            break;
+          }
+        }
+
+        if (uniqueRecords.length === 0) {
+          consecutiveStalls++;
+          if (consecutiveStalls >= 3) {
+            stopReason = 'PAGINATION_STALLED';
+            break;
+          }
+        } else {
+          consecutiveStalls = 0;
+        }
+
+        hasNextPage = Boolean(loopPageInfo?.has_next_page);
+        currentCursor = loopPageInfo?.end_cursor ?? '';
+
+        if (!hasNextPage) {
+          stopReason = 'HAS_NEXT_PAGE_FALSE';
+          break;
+        }
+
+        if (currentCursor) {
+          try {
+            cursorLoopDetector.register(currentCursor);
+          } catch {
+            stopReason = 'GRAPHQL_PAGINATION_LOOP_DETECTED';
+            break;
+          }
+        }
+      }
+    } else {
+      // 4. Locate Post Scroll Container and Engagement Trigger
+      const { container: postContainer } = await findPostScrollContainer(page);
+      const { trigger } = await scrollPostToEngagement(postContainer, page);
 
     // 5. Open Reshares Dialog
     const reshareDialog = await openResharesDialog(page, trigger);
@@ -237,6 +346,7 @@ export async function runSinglePostScrape(
         } else {
           pagesFetched++;
           const template = parseCapturedTemplate(initialPair.postData);
+          currentTemplate = template;
           const safeMeta = getSafeTemplateMetadata(template);
           logger.dialog(`${modePrefix} Captured template: ${safeMeta.friendlyName} (cursorHash: ${safeMeta.cursorHash})`);
 
@@ -349,8 +459,9 @@ export async function runSinglePostScrape(
         }
       }
     }
+  }
 
-    const completedAt = new Date().toISOString();
+  const completedAt = new Date().toISOString();
     const durationMs = Date.now() - startTimeMs;
 
     return {
@@ -365,6 +476,7 @@ export async function runSinglePostScrape(
       completedAt,
       durationMs,
       sessionState,
+      template: currentTemplate,
     };
   } catch (err) {
     const completedAt = new Date().toISOString();

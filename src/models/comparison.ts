@@ -44,6 +44,7 @@ export interface ScrapeRunResult {
   completedAt: string;
   durationMs: number;
   sessionState: FacebookSessionState;
+  template?: any;
 }
 
 /**

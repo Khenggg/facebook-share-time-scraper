@@ -131,6 +131,7 @@ async function run() {
         maxSharesPerPost: maxShares,
         maxRunTimeSeconds,
         timezone,
+        capturedTemplate: anonResult?.template,
       });
     }
 

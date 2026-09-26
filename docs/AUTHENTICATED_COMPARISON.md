@@ -126,3 +126,39 @@ npm run experiment:auth-compare -- \
 
 ### Unknowns
 - Whether differences between two consecutive runs on the same post are due to authentication state or natural Facebook feed ranking / temporal changes between run intervals.
+
+---
+
+## 8. Empirical Findings & Experimental Benchmarking Results
+
+### Test Environment & Target Post:
+- **Target Post URL**: `https://www.facebook.com/TheYenOfficial/posts/pfbid02wsTeEnWsUxxZcFqHv7AYuRuaUnbPTRnVeDnuRJNvoM6k4DxZxhqK5JN2DYkVR6Npl`
+- **Authenticated Session**: Active session verified (masked ID: `****6071`).
+- **Date of Experiment**: September 2026.
+
+### Finding 1: Desktop Web UI Discrepancy (UI Composer Hijacking)
+- **Anonymous Session**: Facebook renders an engagement statistics row separate from action buttons:
+  `All reactions: 3.4K · 885 comments · 350 shares`.
+  Clicking `350 shares` cleanly opens the `People who shared this` modal and dispatches `CometResharesFeedPaginationQuery`.
+- **Authenticated Session**: Facebook Comet removes the separate clickable share count. Instead, it embeds the number `350` into the Share Action button (`aria-label="Gửi nội dung này cho bạn bè hoặc đăng lên trang cá nhân của bạn."`). Clicking it opens the **Share Composer** (to share on feed or Messenger) rather than displaying the list of who shared.
+- **Architectural Solution (Plan B - Direct GraphQL Replay)**:
+  By capturing the query template in Anonymous mode and executing direct GraphQL replay with the authenticated session's cookies (`c_user`, `xs`, `fb_dtsg`), the scraper successfully queries Facebook's backend directly without relying on UI modals.
+
+### Finding 2: Quantitative Comparison Metrics
+
+| Metric | Anonymous Session | Authenticated Session (Plan B) | Comparison / Diff |
+| :--- | :--- | :--- | :--- |
+| **Total Reshares Retrieved** | 6 | 4 | Anon +2 |
+| **Unique Sharers** | 6 | 4 | Anon +2 |
+| **Pages Fetched** | 4 | 4 | Identical |
+| **Stop Reason** | `HAS_NEXT_PAGE_FALSE` | `HAS_NEXT_PAGE_FALSE` | Identical |
+| **Execution Duration** | 9s | 13s | Comparable |
+| **Overlap Count** | **4** | **4** | 100% of Auth subset |
+| **Anonymous-Only Records** | **2** (`Vu Hoa`, `Lương Văn Hiển`) | 0 | Unfiltered public graph |
+| **Authenticated-Only Records**| **0** | **0** | No extra private shares |
+| **Jaccard Similarity Index** | — | — | **66.67%** |
+
+### Key Conclusion:
+1. **Authenticated mode does not grant access to "more" or "all" shares**: Contrary to common assumptions, the logged-in test account did not observe any reshares that were hidden from the anonymous scraper (`AUTH_ONLY = 0`).
+2. **Account personalization can reduce visibility**: Anonymous mode actually observed 2 additional public shares that Facebook's feed ranking or relationship filters excluded from the authenticated user's feed (`ANON_ONLY = 2`).
+3. **Canonical Timestamp Reliability**: All records in both modes strictly extracted their timestamp from `edge.node.creation_time`, validating the immutable contract across both access methods.
